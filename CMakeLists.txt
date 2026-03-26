@@ -7,4 +7,4 @@ add_executable(f1rc
 )
 
 add_subdirectory(utils)
-add_subdirectory(hldc)
+add_subdirectory(comms)
