@@ -1,3 +1,6 @@
+#include <stdint.h>
+#include <stddef.h>
+
 #include "crc.h"
 
 int crc16_calculate(const uint8_t *data, size_t length)
