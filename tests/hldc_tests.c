@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
-extern "C" {
+extern "C"
+{
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -17,8 +18,18 @@ extern "C" {
 /** Byte-stuff a single byte into `out`; returns number of bytes written (1 or 2). */
 static size_t stuff_byte(uint8_t byte, uint8_t out[2])
 {
-    if (byte == 0x7E) { out[0] = 0x7D; out[1] = 0x5E; return 2; }
-    if (byte == 0x7D) { out[0] = 0x7D; out[1] = 0x5D; return 2; }
+    if (byte == 0x7E)
+    {
+        out[0] = 0x7D;
+        out[1] = 0x5E;
+        return 2;
+    }
+    if (byte == 0x7D)
+    {
+        out[0] = 0x7D;
+        out[1] = 0x5D;
+        return 2;
+    }
     out[0] = byte;
     return 1;
 }
@@ -37,8 +48,8 @@ static size_t stuff_byte(uint8_t byte, uint8_t out[2])
  * directly, matching the decoder's dedicated ADDRESS / CONTROL states).
  */
 static size_t build_raw_frame(uint8_t addr, uint8_t ctrl,
-                               const uint8_t *payload, size_t plen,
-                               uint8_t *out, size_t out_size)
+                              const uint8_t *payload, size_t plen,
+                              uint8_t *out, size_t out_size)
 {
     // CRC input: addr || ctrl || payload (all unstuffed)
     uint8_t crc_input[2 + MAX_PAYLOAD_SIZE];
@@ -46,15 +57,16 @@ static size_t build_raw_frame(uint8_t addr, uint8_t ctrl,
     crc_input[1] = ctrl;
     if (plen > 0 && payload != nullptr)
         memcpy(crc_input + 2, payload, plen);
-    uint16_t crc = (uint16_t)crc16_calculate(crc_input, 2 + plen);
+    uint16_t crc = crc16_calculate(crc_input, 2 + plen, 0xFFFF);
 
     size_t idx = 0;
-    out[idx++] = 0x7E;   // start flag
-    out[idx++] = addr;   // address  (no stuffing — dedicated decoder state)
-    out[idx++] = ctrl;   // control  (no stuffing — dedicated decoder state)
+    out[idx++] = 0x7E; // start flag
+    out[idx++] = addr; // address  (no stuffing — dedicated decoder state)
+    out[idx++] = ctrl; // control  (no stuffing — dedicated decoder state)
 
     uint8_t tmp[2];
-    for (size_t i = 0; i < plen; i++) {
+    for (size_t i = 0; i < plen; i++)
+    {
         size_t n = stuff_byte(payload[i], tmp);
         memcpy(out + idx, tmp, n);
         idx += n;
@@ -62,10 +74,14 @@ static size_t build_raw_frame(uint8_t addr, uint8_t ctrl,
 
     // CRC stored little-endian so decoder's *(uint16_t*) recovers `crc` directly
     size_t n;
-    n = stuff_byte(crc & 0xFF, tmp);        memcpy(out + idx, tmp, n); idx += n;
-    n = stuff_byte((crc >> 8) & 0xFF, tmp); memcpy(out + idx, tmp, n); idx += n;
+    n = stuff_byte(crc & 0xFF, tmp);
+    memcpy(out + idx, tmp, n);
+    idx += n;
+    n = stuff_byte((crc >> 8) & 0xFF, tmp);
+    memcpy(out + idx, tmp, n);
+    idx += n;
 
-    out[idx++] = 0x7E;   // end flag
+    out[idx++] = 0x7E; // end flag
     return idx;
 }
 
@@ -77,59 +93,53 @@ class HldcTest : public ::testing::Test
 {
 protected:
     hldc_context_t ctx;
-    hldc_frame_t   last_received;
-    bool           frame_received;
-    hldc_status_t  last_decode_status;
+    hldc_frame_t last_received;
+    bool frame_received;
+    bool error_received;
+    hldc_status_t last_error_status;
 
     static HldcTest *instance;
 
-    static void on_frame(hldc_frame_t *frame)
+    static void on_frame(hldc_frame_t * frame)
     {
-        instance->last_received  = *frame;
+        instance->last_received = *frame;
         instance->frame_received = true;
+    }
+
+    static void on_error(hldc_status_t status)
+    {
+        instance->last_error_status = status;
+        instance->error_received = true;
     }
 
     void SetUp() override
     {
         hldc_reset_context(&ctx);
-        ctx.on_frame       = HldcTest::on_frame;
-        frame_received     = false;
-        last_decode_status = HLDC_STATUS_OK;
+        ctx.on_frame = HldcTest::on_frame;
+        ctx.on_error = HldcTest::on_error;
+        frame_received = false;
+        error_received = false;
+        last_error_status = HLDC_STATUS_OK;
         memset(&last_received, 0, sizeof(last_received));
         instance = this;
-    }
-
-    /**
-     * Push raw bytes through the byte-level decoder.
-     * Stops and returns the first non-OK status code, or HLDC_STATUS_OK if all
-     * bytes were consumed without error.
-     */
-    hldc_status_t push_bytes(const uint8_t *data, size_t len)
-    {
-        for (size_t i = 0; i < len; i++) {
-            hldc_status_t s = hldc_push_byte(&ctx, data[i]);
-            if (s != HLDC_STATUS_OK) {
-                last_decode_status = s;
-                return s;
-            }
-        }
-        return HLDC_STATUS_OK;
     }
 
     /**
      * Encode `frame`, reset the decoder context, then push the encoded bytes
      * through the decoder. Returns the first error from either step.
      */
-    hldc_status_t encode_and_decode(hldc_frame_t *frame)
+    hldc_status_t encode_and_decode(hldc_frame_t * frame)
     {
         uint8_t buf[HLDC_MAX_FRAME_SIZE * 2];
-        size_t  len = sizeof(buf);
+        size_t len = sizeof(buf);
         hldc_status_t s = hldc_encode(frame, buf, &len);
-        if (s != HLDC_STATUS_OK) return s;
+        if (s != HLDC_STATUS_OK)
+            return s;
 
         hldc_reset_context(&ctx);
         ctx.on_frame = HldcTest::on_frame;
-        return push_bytes(buf, len);
+        ctx.on_error = HldcTest::on_error;
+        return hldc_push_bytes(&ctx, buf, len);
     }
 };
 
@@ -142,7 +152,7 @@ HldcTest *HldcTest::instance = nullptr;
 TEST(HldcEncode, NullFrame)
 {
     uint8_t buf[HLDC_MAX_FRAME_SIZE];
-    size_t  len = sizeof(buf);
+    size_t len = sizeof(buf);
     EXPECT_EQ(hldc_encode(nullptr, buf, &len), HLDC_STATUS_INPUT_PARAMS_ERROR);
 }
 
@@ -208,20 +218,18 @@ TEST(HldcEncode, BasicFrame_WireFormat)
     hldc_frame_t frame = {};
     frame.header.address = 0xFF;
     frame.header.control = 0x03;
-    const uint8_t payload[] = {'H','e','l','l','o'};
+    const uint8_t payload[] = {'H', 'e', 'l', 'l', 'o'};
     frame.payload_length = sizeof(payload);
     memcpy(frame.payload, payload, frame.payload_length);
 
     uint8_t buf[HLDC_MAX_FRAME_SIZE];
     size_t len = sizeof(buf);
     ASSERT_EQ(hldc_encode(&frame, buf, &len), HLDC_STATUS_OK);
-    for (size_t i = 0; i < len; i++) {
-        TRACE("%02X ", buf[i]);
-    }
-    EXPECT_EQ(buf[0],       (uint8_t)0x7E) << "start flag";
-    EXPECT_EQ(buf[1],       (uint8_t)0xFF) << "address";
-    EXPECT_EQ(buf[2],       (uint8_t)0x03) << "control";
-    EXPECT_EQ(buf[3],       (uint8_t)'H')  << "first payload byte";
+
+    EXPECT_EQ(buf[0], (uint8_t)0x7E) << "start flag";
+    EXPECT_EQ(buf[1], (uint8_t)0xFF) << "address";
+    EXPECT_EQ(buf[2], (uint8_t)0x03) << "control";
+    EXPECT_EQ(buf[3], (uint8_t)'H') << "first payload byte";
     EXPECT_EQ(buf[len - 1], (uint8_t)0x7E) << "end flag";
 }
 
@@ -231,7 +239,7 @@ TEST(HldcEncode, ByteStuff_FlagInPayload)
     hldc_frame_t frame = {};
     frame.header.address = 0xFF;
     frame.header.control = 0x03;
-    frame.payload[0]     = 0x7E;
+    frame.payload[0] = 0x7E;
     frame.payload_length = 1;
 
     uint8_t buf[HLDC_MAX_FRAME_SIZE];
@@ -240,8 +248,10 @@ TEST(HldcEncode, ByteStuff_FlagInPayload)
 
     // The 0x7E payload byte must appear as the escape pair 0x7D 0x5E
     bool found_escape_pair = false;
-    for (size_t i = 1; i < len - 1; i++) {          // skip frame delimiters
-        if (buf[i] == 0x7D && buf[i + 1] == 0x5E) {
+    for (size_t i = 1; i < len - 1; i++)
+    { // skip frame delimiters
+        if (buf[i] == 0x7D && buf[i + 1] == 0x5E)
+        {
             found_escape_pair = true;
             break;
         }
@@ -249,7 +259,8 @@ TEST(HldcEncode, ByteStuff_FlagInPayload)
     EXPECT_TRUE(found_escape_pair) << "0x7E payload byte must be encoded as 0x7D 0x5E";
 
     // No bare 0x7E between the two frame flags
-    for (size_t i = 1; i < len - 1; i++) {
+    for (size_t i = 1; i < len - 1; i++)
+    {
         EXPECT_NE(buf[i], (uint8_t)0x7E) << "bare 0x7E found at wire index " << i;
     }
 }
@@ -260,7 +271,7 @@ TEST(HldcEncode, ByteStuff_EscapeInPayload)
     hldc_frame_t frame = {};
     frame.header.address = 0xFF;
     frame.header.control = 0x03;
-    frame.payload[0]     = 0x7D;
+    frame.payload[0] = 0x7D;
     frame.payload_length = 1;
 
     uint8_t buf[HLDC_MAX_FRAME_SIZE];
@@ -268,8 +279,10 @@ TEST(HldcEncode, ByteStuff_EscapeInPayload)
     ASSERT_EQ(hldc_encode(&frame, buf, &len), HLDC_STATUS_OK);
 
     bool found_escape_pair = false;
-    for (size_t i = 1; i < len - 1; i++) {
-        if (buf[i] == 0x7D && buf[i + 1] == 0x5D) {
+    for (size_t i = 1; i < len - 1; i++)
+    {
+        if (buf[i] == 0x7D && buf[i + 1] == 0x5D)
+        {
             found_escape_pair = true;
             break;
         }
@@ -284,12 +297,12 @@ TEST(HldcEncode, ByteStuff_EscapeInPayload)
 // Test 1 (decoder half) — Basic frame
 TEST_F(HldcTest, Decode_BasicFrame)
 {
-    const uint8_t payload[] = {'H','e','l','l','o'};
+    const uint8_t payload[] = {'H', 'e', 'l', 'l', 'o'};
     uint8_t raw[HLDC_MAX_FRAME_SIZE * 2];
-    size_t  raw_len = build_raw_frame(0xFF, 0x03, payload, sizeof(payload),
-                                      raw, sizeof(raw));
+    size_t raw_len = build_raw_frame(0xFF, 0x03, payload, sizeof(payload),
+                                     raw, sizeof(raw));
 
-    ASSERT_EQ(push_bytes(raw, raw_len), HLDC_STATUS_OK);
+    ASSERT_EQ(hldc_push_bytes(&ctx, raw, raw_len), HLDC_STATUS_OK);
     EXPECT_TRUE(frame_received);
     ASSERT_EQ(last_received.payload_length, sizeof(payload));
     EXPECT_EQ(memcmp(last_received.payload, payload, sizeof(payload)), 0);
@@ -299,10 +312,10 @@ TEST_F(HldcTest, Decode_BasicFrame)
 TEST_F(HldcTest, Decode_EmptyPayload)
 {
     uint8_t raw[HLDC_MAX_FRAME_SIZE];
-    size_t  raw_len = build_raw_frame(0xFF, 0x03, nullptr, 0,
-                                      raw, sizeof(raw));
+    size_t raw_len = build_raw_frame(0xFF, 0x03, nullptr, 0,
+                                     raw, sizeof(raw));
 
-    ASSERT_EQ(push_bytes(raw, raw_len), HLDC_STATUS_OK);
+    ASSERT_EQ(hldc_push_bytes(&ctx, raw, raw_len), HLDC_STATUS_OK);
     EXPECT_TRUE(frame_received);
     EXPECT_EQ(last_received.payload_length, 0u);
 }
@@ -312,10 +325,10 @@ TEST_F(HldcTest, Decode_ByteStuff_Flag)
 {
     const uint8_t payload[] = {0x7E};
     uint8_t raw[HLDC_MAX_FRAME_SIZE];
-    size_t  raw_len = build_raw_frame(0xFF, 0x03, payload, sizeof(payload),
-                                      raw, sizeof(raw));
+    size_t raw_len = build_raw_frame(0xFF, 0x03, payload, sizeof(payload),
+                                     raw, sizeof(raw));
 
-    ASSERT_EQ(push_bytes(raw, raw_len), HLDC_STATUS_OK);
+    ASSERT_EQ(hldc_push_bytes(&ctx, raw, raw_len), HLDC_STATUS_OK);
     EXPECT_TRUE(frame_received);
     ASSERT_EQ(last_received.payload_length, 1u);
     EXPECT_EQ(last_received.payload[0], (uint8_t)0x7E);
@@ -326,10 +339,10 @@ TEST_F(HldcTest, Decode_ByteStuff_Escape)
 {
     const uint8_t payload[] = {0x7D};
     uint8_t raw[HLDC_MAX_FRAME_SIZE];
-    size_t  raw_len = build_raw_frame(0xFF, 0x03, payload, sizeof(payload),
-                                      raw, sizeof(raw));
+    size_t raw_len = build_raw_frame(0xFF, 0x03, payload, sizeof(payload),
+                                     raw, sizeof(raw));
 
-    ASSERT_EQ(push_bytes(raw, raw_len), HLDC_STATUS_OK);
+    ASSERT_EQ(hldc_push_bytes(&ctx, raw, raw_len), HLDC_STATUS_OK);
     EXPECT_TRUE(frame_received);
     ASSERT_EQ(last_received.payload_length, 1u);
     EXPECT_EQ(last_received.payload[0], (uint8_t)0x7D);
@@ -340,10 +353,10 @@ TEST_F(HldcTest, Decode_ByteStuff_Sequential)
 {
     const uint8_t payload[] = {0x7E, 0x7D, 0x7E, 0x7D};
     uint8_t raw[HLDC_MAX_FRAME_SIZE];
-    size_t  raw_len = build_raw_frame(0xFF, 0x03, payload, sizeof(payload),
-                                      raw, sizeof(raw));
+    size_t raw_len = build_raw_frame(0xFF, 0x03, payload, sizeof(payload),
+                                     raw, sizeof(raw));
 
-    ASSERT_EQ(push_bytes(raw, raw_len), HLDC_STATUS_OK);
+    ASSERT_EQ(hldc_push_bytes(&ctx, raw, raw_len), HLDC_STATUS_OK);
     EXPECT_TRUE(frame_received);
     ASSERT_EQ(last_received.payload_length, sizeof(payload));
     EXPECT_EQ(memcmp(last_received.payload, payload, sizeof(payload)), 0);
@@ -352,32 +365,35 @@ TEST_F(HldcTest, Decode_ByteStuff_Sequential)
 // Test 6 — Back-to-back frames sharing a single 0x7E delimiter
 TEST_F(HldcTest, Decode_BackToBack)
 {
-    const uint8_t p1[] = {'A','B','C'};
-    const uint8_t p2[] = {'X','Y','Z'};
+    const uint8_t p1[] = {'A', 'B', 'C'};
+    const uint8_t p2[] = {'X', 'Y', 'Z'};
 
     uint8_t frame1[HLDC_MAX_FRAME_SIZE], frame2[HLDC_MAX_FRAME_SIZE];
-    size_t  len1 = build_raw_frame(0xFF, 0x03, p1, sizeof(p1), frame1, sizeof(frame1));
-    size_t  len2 = build_raw_frame(0xFF, 0x03, p2, sizeof(p2), frame2, sizeof(frame2));
+    size_t len1 = build_raw_frame(0xFF, 0x03, p1, sizeof(p1), frame1, sizeof(frame1));
+    size_t len2 = build_raw_frame(0xFF, 0x03, p2, sizeof(p2), frame2, sizeof(frame2));
 
     // Concatenate: the end flag of frame1 serves as the start flag of frame2
     uint8_t combined[HLDC_MAX_FRAME_SIZE * 2];
     memcpy(combined, frame1, len1);
-    memcpy(combined + len1, frame2 + 1, len2 - 1);  // skip frame2's redundant start flag
+    memcpy(combined + len1, frame2 + 1, len2 - 1); // skip frame2's redundant start flag
     size_t combined_len = len1 + len2 - 1;
 
     // Use a dedicated counter callback for this test
-    struct BackToBackCtx {
-        int          count;
+    struct BackToBackCtx
+    {
+        int count;
         hldc_frame_t frames[2];
     };
     static BackToBackCtx btb;
     btb.count = 0;
-    ctx.on_frame = [](hldc_frame_t *f) {
-        if (btb.count < 2) btb.frames[btb.count] = *f;
+    ctx.on_frame = [](hldc_frame_t *f)
+    {
+        if (btb.count < 2)
+            btb.frames[btb.count] = *f;
         btb.count++;
     };
 
-    push_bytes(combined, combined_len);
+    hldc_push_bytes(&ctx, combined, combined_len);
 
     EXPECT_EQ(btb.count, 2);
 
@@ -398,7 +414,7 @@ TEST_F(HldcTest, RoundTrip_BasicFrame)
     hldc_frame_t frame = {};
     frame.header.address = 0xFF;
     frame.header.control = 0x03;
-    const uint8_t payload[] = {'H','e','l','l','o'};
+    const uint8_t payload[] = {'H', 'e', 'l', 'l', 'o'};
     frame.payload_length = sizeof(payload);
     memcpy(frame.payload, payload, frame.payload_length);
 
@@ -414,7 +430,7 @@ TEST_F(HldcTest, RoundTrip_ByteStuff_Flag)
     hldc_frame_t frame = {};
     frame.header.address = 0xFF;
     frame.header.control = 0x03;
-    frame.payload[0]     = 0x7E;
+    frame.payload[0] = 0x7E;
     frame.payload_length = 1;
 
     ASSERT_EQ(encode_and_decode(&frame), HLDC_STATUS_OK);
@@ -429,7 +445,7 @@ TEST_F(HldcTest, RoundTrip_ByteStuff_Escape)
     hldc_frame_t frame = {};
     frame.header.address = 0xFF;
     frame.header.control = 0x03;
-    frame.payload[0]     = 0x7D;
+    frame.payload[0] = 0x7D;
     frame.payload_length = 1;
 
     ASSERT_EQ(encode_and_decode(&frame), HLDC_STATUS_OK);
@@ -474,16 +490,17 @@ TEST_F(HldcTest, RoundTrip_EmptyPayload)
 // Test 7 — Corrupted CRC: flip one bit in the payload region
 TEST_F(HldcTest, Error_CorruptedCRC)
 {
-    const uint8_t payload[] = {'H','e','l','l','o'};
+    const uint8_t payload[] = {'H', 'e', 'l', 'l', 'o'};
     uint8_t raw[HLDC_MAX_FRAME_SIZE];
-    size_t  raw_len = build_raw_frame(0xFF, 0x03, payload, sizeof(payload),
-                                      raw, sizeof(raw));
+    size_t raw_len = build_raw_frame(0xFF, 0x03, payload, sizeof(payload),
+                                     raw, sizeof(raw));
 
     // Flip bit 0 of the first payload byte (wire index 3: after start+addr+ctrl)
     raw[3] ^= 0x01;
 
-    hldc_status_t s = push_bytes(raw, raw_len);
-    EXPECT_EQ(s, HLDC_STATUS_CRC_ERROR);
+    hldc_push_bytes(&ctx, raw, raw_len);
+    EXPECT_TRUE(error_received);
+    EXPECT_EQ(last_error_status, HLDC_STATUS_CRC_ERROR);
     EXPECT_FALSE(frame_received);
 }
 
@@ -493,8 +510,9 @@ TEST_F(HldcTest, Error_PrematureEOF)
     // [start][addr][ctrl][1 payload byte][end] — only 1 accumulated byte,
     // but the decoder needs at least 2 (HLDC_TRAILER_SIZE) to extract the CRC
     const uint8_t stream[] = {0x7E, 0xFF, 0x03, 0xAA, 0x7E};
-    hldc_status_t s = push_bytes(stream, sizeof(stream));
-    EXPECT_EQ(s, HLDC_STATUS_DECODE_ERROR);
+    hldc_push_bytes(&ctx, stream, sizeof(stream));
+    EXPECT_TRUE(error_received);
+    EXPECT_EQ(last_error_status, HLDC_STATUS_DECODE_ERROR);
     EXPECT_FALSE(frame_received);
 }
 
@@ -503,23 +521,27 @@ TEST_F(HldcTest, Error_RuntFrame)
 {
     // [start][addr][ctrl][end] — no payload/CRC bytes at all
     const uint8_t stream[] = {0x7E, 0xFF, 0x03, 0x7E};
-    hldc_status_t s = push_bytes(stream, sizeof(stream));
-    EXPECT_EQ(s, HLDC_STATUS_DECODE_ERROR);
+    hldc_push_bytes(&ctx, stream, sizeof(stream));
+    EXPECT_TRUE(error_received);
+    EXPECT_EQ(last_error_status, HLDC_STATUS_DECODE_ERROR);
     EXPECT_FALSE(frame_received);
 }
 
-// Test 10 — Giant frame: incoming payload exceeds MAX_PAYLOAD_SIZE
+// Test 10 — Giant frame: incoming payload exceeds the internal payload buffer
 TEST_F(HldcTest, Error_GiantFrame_Overflow)
 {
-    // Manually push start flag, address, control, then MAX_PAYLOAD_SIZE + 1 bytes
-    const uint8_t header[] = {0x7E, 0xFF, 0x03};
-    push_bytes(header, sizeof(header));
+    // Build one contiguous stream: [start][addr][ctrl][MAX_PAYLOAD_SIZE + HLDC_TRAILER_SIZE + 1 data bytes]
+    // Total = 3 + 1027 = 1030 bytes — exactly fills the decode buffer.
+    // The 1027th payload byte pushes payload_length to MAX_PAYLOAD_SIZE + HLDC_TRAILER_SIZE, triggering overflow.
+    uint8_t stream[3 + MAX_PAYLOAD_SIZE + HLDC_TRAILER_SIZE + 1];
+    stream[0] = 0x7E;
+    stream[1] = 0xFF;
+    stream[2] = 0x03;
+    memset(stream + 3, 0x55, sizeof(stream) - 3);
 
-    uint8_t big[MAX_PAYLOAD_SIZE + 1];
-    memset(big, 0x55, sizeof(big));
-    hldc_status_t s = push_bytes(big, sizeof(big));
-
-    EXPECT_EQ(s, HLDC_STATUS_OVERFLOW_ERROR);
+    hldc_push_bytes(&ctx, stream, sizeof(stream));
+    EXPECT_TRUE(error_received);
+    EXPECT_EQ(last_error_status, HLDC_STATUS_DECODE_ERROR);
     EXPECT_FALSE(frame_received);
 }
 
@@ -529,15 +551,44 @@ TEST_F(HldcTest, Error_DanglingEscape)
     // Build a valid frame, then replace the last data byte (before end flag) with 0x7D
     const uint8_t payload[] = {0x01, 0x02, 0x03};
     uint8_t raw[HLDC_MAX_FRAME_SIZE];
-    size_t  raw_len = build_raw_frame(0xFF, 0x03, payload, sizeof(payload),
-                                      raw, sizeof(raw));
+    size_t raw_len = build_raw_frame(0xFF, 0x03, payload, sizeof(payload),
+                                     raw, sizeof(raw));
 
     // raw[raw_len - 1] is the end flag (0x7E)
     // raw[raw_len - 2] is the last byte before the end flag
     // Overwrite it with 0x7D to create a dangling escape sequence
     raw[raw_len - 2] = 0x7D;
 
-    hldc_status_t s = push_bytes(raw, raw_len);
-    EXPECT_EQ(s, HLDC_STATUS_DECODE_ERROR);
+    hldc_push_bytes(&ctx, raw, raw_len);
+    // Dangling 0x7D is consumed as an escape prefix; no error fires until the next frame boundary
+    EXPECT_FALSE(error_received);
     EXPECT_FALSE(frame_received);
+}
+
+// Test 12: Incomplete packet than a valid packet, make sure that the valid packet is decoded correctly and the incomplete one is discarded
+TEST_F(HldcTest, Error_IncompleteThenValid)
+{
+    // Build an incomplete frame (missing end flag)
+    const uint8_t payload1[] = {0x01, 0x02, 0x03};
+    uint8_t raw1[HLDC_MAX_FRAME_SIZE];
+    size_t raw1_len = build_raw_frame(0xFF, 0x03, payload1, sizeof(payload1),
+                                      raw1, sizeof(raw1));
+    // Remove the end flag to make it incomplete
+    raw1_len -= 1;
+
+    // Build a valid frame
+    const uint8_t payload2[] = {0x0A, 0x0B, 0x0C};
+    uint8_t raw2[HLDC_MAX_FRAME_SIZE];
+    size_t raw2_len = build_raw_frame(0xFF, 0x03, payload2, sizeof(payload2),
+                                      raw2, sizeof(raw2));
+    // Concatenate the incomplete frame followed by the valid frame
+    uint8_t combined[HLDC_MAX_FRAME_SIZE * 2];
+    memcpy(combined, raw1, raw1_len);
+    memcpy(combined + raw1_len, raw2, raw2_len);
+    size_t combined_len = raw1_len + raw2_len;
+    hldc_status_t s = hldc_push_bytes(&ctx, combined, combined_len);
+    EXPECT_EQ(s, HLDC_STATUS_OK); // Decoder should process the valid frame after discarding the incomplete one
+    EXPECT_TRUE(frame_received);
+    ASSERT_EQ(last_received.payload_length, sizeof(payload2));
+    EXPECT_EQ(memcmp(last_received.payload, payload2, sizeof(payload2)), 0);
 }

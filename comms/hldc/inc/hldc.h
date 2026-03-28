@@ -6,7 +6,8 @@
 #define HLDC_END_FLAG (0x7E)
 #define HLDC_START_FLAG_SIZE (1)
 #define HLDC_END_FLAG_SIZE (1)
-#define HLDC_ESCAPE_CHAR (0x5E)
+#define HLDC_ESCAPE_CHAR (0x7D)
+#define HLDC_ESCAPE_XOR (0x20)
 
 typedef struct __attribute__((packed))
 {
@@ -36,30 +37,34 @@ typedef struct __attribute__((packed))
 
 typedef void (*on_frame_cb_t)(hldc_frame_t *frame);
 
-enum hldc_state
+typedef enum
 {
     HLDC_STATE_START_FLAG,
     HLDC_STATE_ADDRESS,
     HLDC_STATE_CONTROL,
-    HLDC_STATE_PAYLOAD
-};
+    HLDC_STATE_PAYLOAD,
+    HLDC_STATE_ESCAPED_CHAR
+} hldc_state_t;
 
 typedef enum
 {
     HLDC_STATUS_OK,
     HLDC_STATUS_DECODE_ERROR,
-    HLDC_STATUS_OVERFLOW_ERROR,
     HLDC_STATUS_CRC_ERROR,
     HLDC_STATUS_INPUT_PARAMS_ERROR,
 } hldc_status_t;
 
+typedef void (*on_error_cb_t)(hldc_status_t status);
+
 typedef struct
 {
-    enum hldc_state state;
-    uint8_t buffer[HLDC_MAX_FRAME_SIZE];
-    size_t length;
+    hldc_state_t state;
     hldc_frame_t current_frame;
     on_frame_cb_t on_frame;
+    on_error_cb_t on_error;
+    uint8_t decode_buffer[HLDC_MAX_FRAME_SIZE];
+    size_t decode_buffer_index;
+    size_t bytes_left_to_decode;
 } hldc_context_t;
 
 /**
@@ -70,6 +75,7 @@ typedef struct
  * @return HLDC_STATUS_OK on success, or an appropriate error code on failure.
  */
 hldc_status_t hldc_encode(hldc_frame_t *frame, uint8_t *buffer, size_t *length);
-hldc_status_t push_data(hldc_context_t *ctx, uint8_t *data, size_t length);
+hldc_status_t hldc_push_bytes(hldc_context_t *ctx, const uint8_t *data, size_t length);
+void hldc_reset_context(hldc_context_t *ctx);
 
 #endif /* HLDC_H_ */
