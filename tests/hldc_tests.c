@@ -139,7 +139,10 @@ protected:
         hldc_reset_context(&ctx);
         ctx.on_frame = HldcTest::on_frame;
         ctx.on_error = HldcTest::on_error;
-        return hldc_push_bytes(&ctx, buf, len);
+        s = hldc_push_bytes(&ctx, buf, len);
+        if (s != HLDC_STATUS_OK)
+            return s;
+        return hldc_decode_pushed_bytes(&ctx);
     }
 };
 
@@ -303,6 +306,7 @@ TEST_F(HldcTest, Decode_BasicFrame)
                                      raw, sizeof(raw));
 
     ASSERT_EQ(hldc_push_bytes(&ctx, raw, raw_len), HLDC_STATUS_OK);
+    ASSERT_EQ(hldc_decode_pushed_bytes(&ctx), HLDC_STATUS_OK);
     EXPECT_TRUE(frame_received);
     ASSERT_EQ(last_received.payload_length, sizeof(payload));
     EXPECT_EQ(memcmp(last_received.payload, payload, sizeof(payload)), 0);
@@ -316,6 +320,7 @@ TEST_F(HldcTest, Decode_EmptyPayload)
                                      raw, sizeof(raw));
 
     ASSERT_EQ(hldc_push_bytes(&ctx, raw, raw_len), HLDC_STATUS_OK);
+    ASSERT_EQ(hldc_decode_pushed_bytes(&ctx), HLDC_STATUS_OK);
     EXPECT_TRUE(frame_received);
     EXPECT_EQ(last_received.payload_length, 0u);
 }
@@ -329,6 +334,7 @@ TEST_F(HldcTest, Decode_ByteStuff_Flag)
                                      raw, sizeof(raw));
 
     ASSERT_EQ(hldc_push_bytes(&ctx, raw, raw_len), HLDC_STATUS_OK);
+    ASSERT_EQ(hldc_decode_pushed_bytes(&ctx), HLDC_STATUS_OK);
     EXPECT_TRUE(frame_received);
     ASSERT_EQ(last_received.payload_length, 1u);
     EXPECT_EQ(last_received.payload[0], (uint8_t)0x7E);
@@ -343,6 +349,7 @@ TEST_F(HldcTest, Decode_ByteStuff_Escape)
                                      raw, sizeof(raw));
 
     ASSERT_EQ(hldc_push_bytes(&ctx, raw, raw_len), HLDC_STATUS_OK);
+    ASSERT_EQ(hldc_decode_pushed_bytes(&ctx), HLDC_STATUS_OK);
     EXPECT_TRUE(frame_received);
     ASSERT_EQ(last_received.payload_length, 1u);
     EXPECT_EQ(last_received.payload[0], (uint8_t)0x7D);
@@ -357,6 +364,7 @@ TEST_F(HldcTest, Decode_ByteStuff_Sequential)
                                      raw, sizeof(raw));
 
     ASSERT_EQ(hldc_push_bytes(&ctx, raw, raw_len), HLDC_STATUS_OK);
+    ASSERT_EQ(hldc_decode_pushed_bytes(&ctx), HLDC_STATUS_OK);
     EXPECT_TRUE(frame_received);
     ASSERT_EQ(last_received.payload_length, sizeof(payload));
     EXPECT_EQ(memcmp(last_received.payload, payload, sizeof(payload)), 0);
@@ -394,6 +402,7 @@ TEST_F(HldcTest, Decode_BackToBack)
     };
 
     hldc_push_bytes(&ctx, combined, combined_len);
+    hldc_decode_pushed_bytes(&ctx);
 
     EXPECT_EQ(btb.count, 2);
 
@@ -499,6 +508,7 @@ TEST_F(HldcTest, Error_CorruptedCRC)
     raw[3] ^= 0x01;
 
     hldc_push_bytes(&ctx, raw, raw_len);
+    hldc_decode_pushed_bytes(&ctx);
     EXPECT_TRUE(error_received);
     EXPECT_EQ(last_error_status, HLDC_STATUS_CRC_ERROR);
     EXPECT_FALSE(frame_received);
@@ -511,6 +521,7 @@ TEST_F(HldcTest, Error_PrematureEOF)
     // but the decoder needs at least 2 (HLDC_TRAILER_SIZE) to extract the CRC
     const uint8_t stream[] = {0x7E, 0xFF, 0x03, 0xAA, 0x7E};
     hldc_push_bytes(&ctx, stream, sizeof(stream));
+    hldc_decode_pushed_bytes(&ctx);
     EXPECT_TRUE(error_received);
     EXPECT_EQ(last_error_status, HLDC_STATUS_DECODE_ERROR);
     EXPECT_FALSE(frame_received);
@@ -522,6 +533,7 @@ TEST_F(HldcTest, Error_RuntFrame)
     // [start][addr][ctrl][end] — no payload/CRC bytes at all
     const uint8_t stream[] = {0x7E, 0xFF, 0x03, 0x7E};
     hldc_push_bytes(&ctx, stream, sizeof(stream));
+    hldc_decode_pushed_bytes(&ctx);
     EXPECT_TRUE(error_received);
     EXPECT_EQ(last_error_status, HLDC_STATUS_DECODE_ERROR);
     EXPECT_FALSE(frame_received);
@@ -540,6 +552,7 @@ TEST_F(HldcTest, Error_GiantFrame_Overflow)
     memset(stream + 3, 0x55, sizeof(stream) - 3);
 
     hldc_push_bytes(&ctx, stream, sizeof(stream));
+    hldc_decode_pushed_bytes(&ctx);
     EXPECT_TRUE(error_received);
     EXPECT_EQ(last_error_status, HLDC_STATUS_DECODE_ERROR);
     EXPECT_FALSE(frame_received);
@@ -560,6 +573,7 @@ TEST_F(HldcTest, Error_DanglingEscape)
     raw[raw_len - 2] = 0x7D;
 
     hldc_push_bytes(&ctx, raw, raw_len);
+    hldc_decode_pushed_bytes(&ctx);
     // Dangling 0x7D is consumed as an escape prefix; no error fires until the next frame boundary
     EXPECT_FALSE(error_received);
     EXPECT_FALSE(frame_received);
@@ -586,8 +600,8 @@ TEST_F(HldcTest, Error_IncompleteThenValid)
     memcpy(combined, raw1, raw1_len);
     memcpy(combined + raw1_len, raw2, raw2_len);
     size_t combined_len = raw1_len + raw2_len;
-    hldc_status_t s = hldc_push_bytes(&ctx, combined, combined_len);
-    EXPECT_EQ(s, HLDC_STATUS_OK); // Decoder should process the valid frame after discarding the incomplete one
+    ASSERT_EQ(hldc_push_bytes(&ctx, combined, combined_len), HLDC_STATUS_OK);
+    hldc_decode_pushed_bytes(&ctx);
     EXPECT_TRUE(frame_received);
     ASSERT_EQ(last_received.payload_length, sizeof(payload2));
     EXPECT_EQ(memcmp(last_received.payload, payload2, sizeof(payload2)), 0);

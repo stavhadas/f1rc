@@ -272,8 +272,14 @@ hldc_status_t hldc_push_bytes(hldc_context_t *ctx, const uint8_t *data, size_t l
     }
     memcpy(ctx->decode_buffer + ctx->decode_buffer_index, data, length);
     ctx->bytes_left_to_decode += length;
+    return HLDC_STATUS_OK;
+}
+
+hldc_status_t hldc_decode_pushed_bytes(hldc_context_t *ctx)
+{
     while (ctx->bytes_left_to_decode > 0)
     {
+        hldc_status_t status = HLDC_STATUS_OK;
         status = hldc_handle_byte(ctx, ctx->decode_buffer[ctx->decode_buffer_index]);
         if (status == HLDC_STATUS_OK)
         {

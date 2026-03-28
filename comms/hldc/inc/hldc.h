@@ -75,7 +75,27 @@ typedef struct
  * @return HLDC_STATUS_OK on success, or an appropriate error code on failure.
  */
 hldc_status_t hldc_encode(hldc_frame_t *frame, uint8_t *buffer, size_t *length);
+
+/**
+ * Pushes bytes into the decoder context.
+ * @note For actually decoding the pushed bytes into frames, call hldc_decode_pushed_bytes() after pushing.
+ * @param ctx The HLDC decoder context.
+ * @param data The byte buffer to push into the decoder.
+ * @param length The number of bytes to push from the data buffer.
+ * @return HLDC_STATUS_OK on success, or an appropriate error code on failure.
+ */
 hldc_status_t hldc_push_bytes(hldc_context_t *ctx, const uint8_t *data, size_t length);
+
+/**
+ * Decodes the bytes that have been pushed into the decoder context through hldc_push_bytes(). This function should be called after pushing bytes to actually process them and extract frames.
+ * @param ctx The HLDC decoder context containing the pushed bytes to decode.
+ * @return HLDC_STATUS_OK on success, or an appropriate error code on failure.
+ */
+hldc_status_t hldc_decode_pushed_bytes(hldc_context_t *ctx);
+
+/**
+ * Resets the decoder context to its initial state
+ */
 void hldc_reset_context(hldc_context_t *ctx);
 
 #endif /* HLDC_H_ */
