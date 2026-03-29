@@ -263,25 +263,34 @@ TEST(MfriRoundTrip, BasicFrame)
 // NWK Layer — Decode
 // ===========================================================================
 
-// Bit layout in nwk_port_t (LSB-first, packed, GCC):
-//   bit 0: forwarded
-//   bit 1: encrypted
-//   bits 2-7: app_port
+// Wire bit layout per spec (bit 0 = LSB, bit 7 = MSB):
 //
-// Bit layout in nwk_device_info_t (LSB-first, packed, GCC):
-//   bit 0: ack_req
-//   bit 1: receiver_type
-//   bits 2-3: sender_type
-//   bit 4: ack_reply
-//   bits 5-7: hop_count
+// nwk_port_t:
+//   bits 5-0: app_port
+//   bit 6:    encrypted
+//   bit 7:    forwarded
+// Wire byte formula: (forwarded<<7) | (encrypted<<6) | (app_port & 0x3F)
+//
+// nwk_device_info_t:
+//   bits 2-0: hop_count
+//   bit 3:    ack_reply
+//   bits 5-4: sender_type
+//   bit 6:    receiver_type
+//   bit 7:    ack_req
+// Wire byte formula: (ack_req<<7) | (receiver_type<<6) | (sender_type<<4) | (ack_reply<<3) | (hop_count & 7)
+//
+// NOTE: The current struct declarations list forwarded/ack_req first, which
+// in GCC little-endian maps them to bit 0 (LSB) — the opposite of the spec.
+// Tests below use spec-correct wire bytes; tests that check wire byte values
+// or specific field decoding will FAIL until the struct field order is fixed.
 
 TEST(NwkDecode, BasicFrame)
 {
     const uint8_t payload[] = {0xAA, 0xBB};
-    // port_byte: forwarded=0, encrypted=0, app_port=NWK_PORT_PING=1
-    // → 0 | 0 | (1<<2) = 0x04
+    // port_byte: forwarded=0(bit7), encrypted=0(bit6), app_port=NWK_PORT_PING=1(bits5-0)
+    // → (0<<7) | (0<<6) | 1 = 0x01
     uint8_t raw[NWK_MAX_FRAME_SIZE];
-    size_t len = build_nwk_frame(0x04, 0x00, 0x42, payload, sizeof(payload), raw);
+    size_t len = build_nwk_frame(0x01, 0x00, 0x42, payload, sizeof(payload), raw);
 
     nwk_frame_t frame;
     ASSERT_EQ(nwk_decode_frame(raw, len, &frame), SIMPLICITI_SUCCESS);
@@ -295,8 +304,10 @@ TEST(NwkDecode, BasicFrame)
 
 TEST(NwkDecode, EmptyPayload)
 {
+    // port_byte: forwarded=0(bit7), encrypted=0(bit6), app_port=NWK_PORT_PING=1(bits5-0)
+    // → (0<<7) | (0<<6) | 1 = 0x01
     uint8_t raw[sizeof(nwk_header_t)];
-    size_t len = build_nwk_frame(0x04, 0x00, 0x01, nullptr, 0, raw);
+    size_t len = build_nwk_frame(0x01, 0x00, 0x01, nullptr, 0, raw);
 
     nwk_frame_t frame;
     ASSERT_EQ(nwk_decode_frame(raw, len, &frame), SIMPLICITI_SUCCESS);
@@ -305,10 +316,10 @@ TEST(NwkDecode, EmptyPayload)
 
 TEST(NwkDecode, PortBitFields)
 {
-    // forwarded=0(bit0), encrypted=1(bit1), app_port=1(bits2-7)
-    // port_byte = 0 | (1<<1) | (1<<2) = 0x06
+    // forwarded=0(bit7), encrypted=1(bit6), app_port=1(bits5-0)
+    // port_byte = (0<<7) | (1<<6) | 1 = 0x41
     uint8_t raw[sizeof(nwk_header_t)];
-    size_t len = build_nwk_frame(0x06, 0x00, 0x00, nullptr, 0, raw);
+    size_t len = build_nwk_frame(0x41, 0x00, 0x00, nullptr, 0, raw);
 
     nwk_frame_t frame;
     ASSERT_EQ(nwk_decode_frame(raw, len, &frame), SIMPLICITI_SUCCESS);
@@ -319,11 +330,12 @@ TEST(NwkDecode, PortBitFields)
 
 TEST(NwkDecode, DeviceInfoBitFields)
 {
-    // ack_req=1(bit0), receiver_type=1(bit1), sender_type=0(bits2-3),
-    // ack_reply=1(bit4), hop_count=3(bits5-7)
-    // di_byte = 1 | (1<<1) | (0<<2) | (1<<4) | (3<<5) = 1|2|0|16|96 = 115 = 0x73
+    // ack_req=1(bit7), receiver_type=1(bit6), sender_type=END_DEVICE=0(bits5-4),
+    // ack_reply=1(bit3), hop_count=3(bits2-0)
+    // di_byte = (1<<7) | (1<<6) | (0<<4) | (1<<3) | 3 = 128|64|0|8|3 = 203 = 0xCB
+    // port_byte: forwarded=0, encrypted=0, app_port=1 → 0x01
     uint8_t raw[sizeof(nwk_header_t)];
-    size_t len = build_nwk_frame(0x04, 0x73, 0x00, nullptr, 0, raw);
+    size_t len = build_nwk_frame(0x01, 0xCB, 0x00, nullptr, 0, raw);
 
     nwk_frame_t frame;
     ASSERT_EQ(nwk_decode_frame(raw, len, &frame), SIMPLICITI_SUCCESS);
@@ -351,7 +363,7 @@ TEST(NwkDecode, TooLong)
 TEST(NwkDecode, NullParams)
 {
     uint8_t raw[sizeof(nwk_header_t)] = {};
-    raw[0] = 0x04; // valid port byte
+    raw[0] = 0x01; // valid spec-correct port byte (app_port=1)
     nwk_frame_t frame;
     EXPECT_EQ(nwk_decode_frame(nullptr, sizeof(nwk_header_t), &frame), SIMPLICITI_ERROR_INVALID_PARAM);
     EXPECT_EQ(nwk_decode_frame(raw, sizeof(nwk_header_t), nullptr),    SIMPLICITI_ERROR_INVALID_PARAM);
@@ -383,8 +395,8 @@ TEST(NwkEncode, BasicFrame)
 
 TEST(NwkEncode, PortBitFields)
 {
-    // forwarded=false, encrypted=false, app_port=NWK_PORT_PING=1
-    // Expected port byte: 0 | 0 | (1<<2) = 0x04
+    // forwarded=false(bit7), encrypted=false(bit6), app_port=NWK_PORT_PING=1(bits5-0)
+    // Spec-correct expected port byte: (0<<7) | (0<<6) | 1 = 0x01
     nwk_frame_t frame;
     memset(&frame, 0, sizeof(frame));
     frame.header.port.forwarded = false;
@@ -396,7 +408,7 @@ TEST(NwkEncode, PortBitFields)
     uint8_t buf[NWK_MAX_FRAME_SIZE];
     size_t len = sizeof(buf);
     ASSERT_EQ(nwk_encode_frame(&frame, buf, &len), SIMPLICITI_SUCCESS);
-    EXPECT_EQ(buf[0], 0x04u) << "port byte with app_port=1, encrypted=0, forwarded=0";
+    EXPECT_EQ(buf[0], 0x01u) << "port byte: forwarded=0, encrypted=0, app_port=1";
 }
 
 TEST(NwkEncode, PayloadTooLarge)
@@ -416,7 +428,7 @@ TEST(NwkEncode, NullParams)
     memset(&frame, 0, sizeof(frame));
     uint8_t buf[NWK_MAX_FRAME_SIZE];
     size_t len = sizeof(buf);
-    EXPECT_EQ(nwk_encode_frame(nullptr, buf, &len),  SIMPLICITI_ERROR_INVALID_PARAM);
+    EXPECT_EQ(nwk_encode_frame(nullptr, buf, &len),    SIMPLICITI_ERROR_INVALID_PARAM);
     EXPECT_EQ(nwk_encode_frame(&frame, nullptr, &len), SIMPLICITI_ERROR_INVALID_PARAM);
     EXPECT_EQ(nwk_encode_frame(&frame, buf, nullptr),  SIMPLICITI_ERROR_INVALID_PARAM);
 }
@@ -463,10 +475,11 @@ TEST(NwkRoundTrip, BasicFrame)
 TEST(SimplictiDecode, BasicFrame)
 {
     const uint8_t payload[] = {0xCA, 0xFE};
-    // port_byte: forwarded=0, encrypted=0, app_port=NWK_PORT_PING=1 → 0x04
+    // port_byte: forwarded=0(bit7), encrypted=0(bit6), app_port=NWK_PORT_PING=1(bits5-0)
+    // → (0<<7) | (0<<6) | 1 = 0x01
     uint8_t raw[SIMPLICITI_MAX_FRAME_SIZE];
     size_t len = build_simpliciti_frame(0xDEAD1234, 0xBEEF5678,
-                                        0x04, 0x00, 0x55,
+                                        0x01, 0x00, 0x55,
                                         payload, sizeof(payload), raw);
 
     simpliciti_frame_t frame;
@@ -512,7 +525,7 @@ TEST(SimplictiEncode, BasicFrame)
     memcpy(&src, buf + 5, 4);
     EXPECT_EQ(dst, 0x11223344u);
     EXPECT_EQ(src, 0x55667788u);
-    // NWK header follows MFRI header: tractid is at byte 11
+    // NWK header follows MFRI header: tractid at wire byte 11
     EXPECT_EQ(buf[11], 0xABu) << "tractid at wire offset 11";
     // Payload follows NWK header: first byte at offset 12
     EXPECT_EQ(buf[12], 0x01u);
@@ -535,13 +548,13 @@ TEST(SimplictiRoundTrip, BasicFrame)
     const uint8_t payload[] = {0xAA, 0xBB, 0xCC, 0xDD};
 
     simpliciti_frame_t tx = {};
-    tx.mfri_header.dstaddr      = 0x12345678;
-    tx.mfri_header.srcaddr      = 0x87654321;
-    tx.mfri_header.length       = (uint8_t)(sizeof(nwk_header_t) + sizeof(payload));
-    tx.nwk_header.port.app_port = NWK_PORT_LINK;
+    tx.mfri_header.dstaddr       = 0x12345678;
+    tx.mfri_header.srcaddr       = 0x87654321;
+    tx.mfri_header.length        = (uint8_t)(sizeof(nwk_header_t) + sizeof(payload));
+    tx.nwk_header.port.app_port  = NWK_PORT_LINK;
     tx.nwk_header.port.encrypted = false;
     tx.nwk_header.port.forwarded = false;
-    tx.nwk_header.tractid       = 0x99;
+    tx.nwk_header.tractid        = 0x99;
     memcpy(tx.payload, payload, sizeof(payload));
 
     uint8_t buf[SIMPLICITI_MAX_FRAME_SIZE];

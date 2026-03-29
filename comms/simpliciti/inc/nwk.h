@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "simplciti_common.h"
 
@@ -21,6 +22,13 @@ typedef struct __attribute__((packed))
     bool encrypted : 1;
     nwk_app_port_t app_port : 6;
 } nwk_port_t;
+
+
+#define NWK_PORT_FORWARED_MASK (0x80)
+#define NWK_PORT_FORWARDED_SHIFT (7)
+#define NWK_PORT_ENCRYPTED_MASK (0x40)
+#define NWK_PORT_ENCRYPTED_SHIFT (6)
+#define NWK_PORT_APP_PORT_MASK (0x3F)
 
 typedef enum __attribute__((packed))
 {
@@ -45,6 +53,20 @@ typedef struct __attribute__((packed))
     uint8_t hop_count : 3;
 
 } nwk_device_info_t;
+
+#define NWK_DEVICE_INFO_ACK_REQ_MASK (0x80)
+#define NWK_DEVICE_INFO_RECEIVER_TYPE_MASK (0x40)
+#define NWK_DEVICE_INFO_SENDER_TYPE_MASK (0x30)
+#define NWK_DEVICE_INFO_ACK_REPLY_MASK (0x08)
+#define NWK_DEVICE_INFO_HOP_COUNT_MASK (0x07)
+
+#define NWK_DEVICE_INFO_ACK_REQ_SHIFT (7)
+#define NWK_DEVICE_INFO_RECEIVER_TYPE_SHIFT (6)
+#define NWK_DEVICE_INFO_SENDER_TYPE_SHIFT (4)
+#define NWK_DEVICE_INFO_ACK_REPLY_SHIFT (3)
+
+#define NWK_HEADER_SIZE (sizeof(nwk_header_t))
+
 
 typedef struct __attribute__((packed))
 {

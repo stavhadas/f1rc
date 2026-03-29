@@ -38,7 +38,7 @@ simpliciti_status_t mfri_encode_frame(const mfri_frame_t *frame, uint8_t *buffer
 {
     if (frame == NULL || buffer == NULL || length == NULL)
     {
-        TRACE("Null pointer provided for frame, buffer, or length\n");
+        TRACE("Null pointer provided for frame, buffer or length\n");
         return SIMPLICITI_ERROR_INVALID_PARAM;
     }
     if (frame->header.length > MFRI_MAX_PAYLOAD_SIZE)
@@ -46,14 +46,17 @@ simpliciti_status_t mfri_encode_frame(const mfri_frame_t *frame, uint8_t *buffer
         TRACE("Payload length exceeds maximum: %u\n", frame->header.length);
         return SIMPLICITI_ERROR_INVALID_PARAM;
     }
-
+    
     // Encode header
     buffer[0] = frame->header.length;
     *(uint32_t *)(buffer + 1) = frame->header.dstaddr;
     *(uint32_t *)(buffer + 5) = frame->header.srcaddr;
 
     // Copy payload
-    memcpy(buffer + MFRI_HEADER_SIZE, frame->payload, frame->header.length);
+    if (frame->payload != NULL)
+    {
+        memcpy(buffer + MFRI_HEADER_SIZE, frame->payload, frame->header.length);
+    }
     
     *length = MFRI_HEADER_SIZE + frame->header.length;
 
