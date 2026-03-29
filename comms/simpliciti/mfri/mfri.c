@@ -3,7 +3,7 @@
 #include "mfri.h"
 #include "tracing.h"
 
-simplciti_status_t mfri_decode_frame(const uint8_t *data, size_t length, mfri_frame_t *frame)
+simpliciti_status_t mfri_decode_frame(const uint8_t *data, size_t length, mfri_frame_t *frame)
 {
     if (length > MFRI_MAX_FRAME_SIZE || length < MFRI_HEADER_SIZE)
     {
@@ -34,7 +34,7 @@ simplciti_status_t mfri_decode_frame(const uint8_t *data, size_t length, mfri_fr
     return SIMPLICITI_SUCCESS;
 }
 
-simplciti_status_t mfri_encode_frame(const mfri_frame_t *frame, uint8_t *buffer, size_t *length)
+simpliciti_status_t mfri_encode_frame(const mfri_frame_t *frame, uint8_t *buffer, size_t *length)
 {
     if (frame == NULL || buffer == NULL || length == NULL)
     {

@@ -1,7 +1,7 @@
 #include "nwk.h"
 #include "tracing.h"
 
-simplciti_status_t nwk_decode_frame(const uint8_t *data, size_t length, nwk_frame_t *frame)
+simpliciti_status_t nwk_decode_frame(const uint8_t *data, size_t length, nwk_frame_t *frame)
 {
     if (length > NWK_MAX_FRAME_SIZE || length < sizeof(nwk_header_t))
     {
@@ -31,7 +31,7 @@ simplciti_status_t nwk_decode_frame(const uint8_t *data, size_t length, nwk_fram
     return SIMPLICITI_SUCCESS;
 }
 
-simplciti_status_t nwk_encode_frame(const nwk_frame_t *frame, uint8_t *buffer, size_t *length)
+simpliciti_status_t nwk_encode_frame(const nwk_frame_t *frame, uint8_t *buffer, size_t *length)
 {
     if (frame == NULL || buffer == NULL || length == NULL)
     {

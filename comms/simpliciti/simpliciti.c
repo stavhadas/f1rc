@@ -1,4 +1,6 @@
+#include <string.h>
 #include "simpliciti.h"
+#include "tracing.h"
 
 simpliciti_status_t simpliciti_decode_frame(const uint8_t *data,
                                             size_t length,
