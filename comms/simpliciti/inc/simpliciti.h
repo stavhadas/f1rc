@@ -30,6 +30,7 @@ typedef enum
 {
     SIMPLICITI_LINK_STATE_DISCONNECTED,
     SIMPLICITI_LINK_STATE_LINK_REQUESTED,
+    SIMPLICITI_LINK_STATE_WAITING_FOR_LINK,
     SIMPLICITI_LINK_STATE_CONNECTED
 } simpliciti_link_state_t;
 
@@ -45,7 +46,9 @@ typedef struct
 typedef simpliciti_status_t (*simpliciti_send_msg_cb_t)(const uint8_t *buffer, size_t length);
 typedef simpliciti_status_t (*simpliciti_handle_app_message_cb_t)(const simpliciti_frame_t *frame);
 typedef simpliciti_status_t (*simpliciti_get_time_ms_cb_t)(uint32_t *timestamp);
-typedef simpliciti_status_t (*simpliciti_successfull_ping_cb_t)(uint32_t src_address, uint32_t timestamp);
+typedef simpliciti_status_t (*simpliciti_successfull_ping_cb_t)(void);
+typedef simpliciti_status_t (*simpliciti_link_state_change_cb_t)(simpliciti_link_state_t new_state);
+typedef simpliciti_status_t (*simpliciti_out_of_retransmission_cb_t)(const simpliciti_frame_t *frame);
 
 typedef struct
 {
@@ -53,6 +56,9 @@ typedef struct
     simpliciti_handle_app_message_cb_t handle_app_message;
     simpliciti_get_time_ms_cb_t get_time_ms;
     simpliciti_successfull_ping_cb_t successful_ping;
+    simpliciti_link_state_change_cb_t link_state_change;
+    simpliciti_out_of_retransmission_cb_t out_of_retransmission;
+
 } simpliciti_callbacks_t;
 
 typedef struct
@@ -70,7 +76,6 @@ typedef struct
     uint32_t device_address;
     simpliciti_link_info_t link_info;
     uint8_t last_tid;
-    uint32_t last_ping_timestamp;
 } simpliciti_context_t;
 
 
@@ -79,6 +84,7 @@ typedef struct
 #define NWK_PORT_PING_REQUEST (0x01)
 #define NWK_PORT_PING_RESPONSE (0x80)
 #define SIMPLICITI_MAX_RETRIES (3)
+#define SIMPLICITI_BROADCAST_ADDRESS (0xFFFFFFFF)
 
 simpliciti_status_t simpliciti_init(simpliciti_context_t *context);
 
@@ -89,4 +95,10 @@ simpliciti_status_t simpliciti_send_msg(simpliciti_context_t *context, simplicit
 simpliciti_status_t simpliciti_receive_msg(simpliciti_context_t *context, const uint8_t *buffer, size_t length);
 
 simpliciti_status_t simpliciti_send_ping(simpliciti_context_t *context, uint32_t dest_address);
+
+simpliciti_status_t simpliciti_send_link(simpliciti_context_t *context);
+
+simpliciti_status_t simpliciti_wait_for_link(simpliciti_context_t *context);
+
+simpliciti_status_t simpliciti_disconnect(simpliciti_context_t *context);
 #endif // SIMPLICITI_H

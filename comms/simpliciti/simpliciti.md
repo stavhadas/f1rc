@@ -81,19 +81,16 @@ Ping is unicast and blocking on the initiator side — the initiator waits for a
 
 ### 4.2 Port 0x02: Link Establishment
 Requires a bi-directional handshake to populate the local Connection Table.
-* **Client (Initiator):** 1. Broadcasts Link Request: `0x01` | `TRACTID` | `4-byte Link Token` | `Local Port` | `Rx Type` | `Protocol Ver`.
-    2. Starts timeout timer.
-    3. On RX of valid Link Reply, stores Server Address & Port in Connection Table. Returns `Link ID`.
+* **Client (Initiator):** 
+Broadcasts link request, wait for link reply - saves the linked device address
 * **Server (Responder):**
-    1. Blocks in Listen state.
-    2. Validates incoming Link Token.
-    3. Sends Unicast Link Reply: `0x81` | `TRACTID` | `Local Port` | `Rx Type`.
-    4. Stores Client Address & Port in Connection Table. Returns `Link ID`.
+waits for link request, reply
+    
 
-### 4.3 Port 0x02: Unlink (Teardown)
+### 4.3 Port 0x03: Unlink (Teardown)
 Connections are persistent. Dead links must be manually torn down.
 * **Originator:** Disables local Connection Table entry. Sends Unicast Unlink Request: `0x02` | `TRACTID` | `Remote Port`.
-* **Peer:** Uses `Remote Port` and `SrcAddr` to locate and destroy its Connection Table entry. Replies with Unicast: `0x82` | `TRACTID` | `Result Code`.
+* **Peer:** Uses `Remote Port` and `SrcAddr` to locate and destroy its Connection Table entry. Replies with Unicast
 
 ---
 

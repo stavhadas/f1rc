@@ -87,7 +87,6 @@ simpliciti_status_t simpliciti_send_msg(simpliciti_context_t *context, simplicit
     simpliciti_status_t status;
     uint8_t buffer[SIMPLICITI_MAX_FRAME_SIZE];
     size_t length = sizeof(buffer);
-
     // Match tractid
     if (!is_response)
     {
@@ -157,6 +156,37 @@ simpliciti_status_t simpliciti_send_msg(simpliciti_context_t *context, simplicit
     return SIMPLICITI_SUCCESS;
 }
 
+static simpliciti_status_t simpliciti_handle_out_of_retransmissions(simpliciti_context_t *context, const simpliciti_frame_t *frame)
+{
+    switch (frame->nwk_header.port.app_port)
+    {
+    case NWK_PORT_PING_REQUEST:
+        TRACE("Ping Failed after maximum retries, disconnecting\n");
+        context->link_info.link_state = SIMPLICITI_LINK_STATE_DISCONNECTED;
+        if (context->callbacks.link_state_change != NULL)
+        {
+            return context->callbacks.link_state_change(SIMPLICITI_LINK_STATE_DISCONNECTED);
+        }
+        break;
+    case NWK_PORT_LINK:
+        TRACE("Link message failed after maximum retries\n");
+        context->link_info.link_state = SIMPLICITI_LINK_STATE_DISCONNECTED;
+        if (context->callbacks.link_state_change != NULL)
+        {
+            return context->callbacks.link_state_change(SIMPLICITI_LINK_STATE_DISCONNECTED);
+        }
+        break;
+
+    default:
+        if (context->callbacks.out_of_retransmission != NULL)
+        {
+            return context->callbacks.out_of_retransmission(frame);
+        }
+        break;
+    }
+    return SIMPLICITI_SUCCESS;
+}
+
 simpliciti_status_t simpliciti_check_outgoing_messages(simpliciti_context_t *context)
 {
     for (size_t i = 0; i < SIMPLICITI_MAX_TID; i++)
@@ -178,7 +208,7 @@ simpliciti_status_t simpliciti_check_outgoing_messages(simpliciti_context_t *con
                     else
                     {
                         TRACE("Message with TID %zu failed after maximum retries\n", i);
-                        // TODO: Notify application layer of failure if desired
+                        simpliciti_handle_out_of_retransmissions(context, &g_pending_msgs[i].frame);
                         memset(&g_pending_msgs[i], 0, sizeof(simpliciti_outgoing_msg_t));
                     }
                 }
@@ -190,6 +220,7 @@ simpliciti_status_t simpliciti_check_outgoing_messages(simpliciti_context_t *con
             }
         }
     }
+    return SIMPLICITI_SUCCESS;
 }
 
 static simpliciti_status_t simpliciti_handle_ping(simpliciti_context_t *context, const simpliciti_frame_t *frame)
@@ -229,11 +260,10 @@ static simpliciti_status_t simpliciti_handle_ping(simpliciti_context_t *context,
             uint32_t now = 0;
             if (context->callbacks.get_time_ms && context->callbacks.get_time_ms(&now) == SIMPLICITI_SUCCESS)
             {
-                uint32_t rtt = now - context->last_ping_timestamp;
-                TRACE("Ping RTT: %u ms\n", rtt);
+                context->link_info.last_ping_timestamp = now;
                 if (context->callbacks.successful_ping != NULL)
                 {
-                    context->callbacks.successful_ping(frame->mfri_header.srcaddr, rtt);
+                    context->callbacks.successful_ping();
                 }
             }
             else
@@ -257,15 +287,74 @@ static simpliciti_status_t simpliciti_handle_ping(simpliciti_context_t *context,
 
 static simpliciti_status_t simpliciti_handle_link(simpliciti_context_t *context, const simpliciti_frame_t *frame)
 {
-    TRACE("Received link message on port %u\n", frame->nwk_header.port.app_port);
-    // Handle link messages
+    if (g_pending_msgs[frame->nwk_header.tractid].in_use)
+    {
+        if (context->link_info.link_state == SIMPLICITI_LINK_STATE_LINK_REQUESTED)
+        {
+            // Link message is a reply to our link request
+            TRACE("Established link with 0x%08X\n", frame->mfri_header.srcaddr);
+            context->link_info.link_state = SIMPLICITI_LINK_STATE_CONNECTED;
+            context->link_info.dest_address = frame->mfri_header.srcaddr;
+            if (context->callbacks.link_state_change != NULL)
+            {
+                context->callbacks.link_state_change(SIMPLICITI_LINK_STATE_CONNECTED);
+            }
+        }
+        else
+        {
+            TRACE("Received unexpected ACK for link message with TID %u in link state %d\n", frame->nwk_header.tractid, context->link_info.link_state);
+            return SIMPLICITI_ERROR_INVALID_PARAM;
+        }
+    }
+    else
+    {
+        // Link message is a new link request from another device
+        if (context->link_info.link_state == SIMPLICITI_LINK_STATE_WAITING_FOR_LINK)
+        {
+            TRACE("Received link request from 0x%08X while waiting for link\n", frame->mfri_header.srcaddr);
+            
+            // Reply with ACK
+            simpliciti_frame_t response = {0};
+            response.mfri_header.dstaddr = frame->mfri_header.srcaddr;
+            response.mfri_header.srcaddr = context->device_address;
+            response.mfri_header.length = (uint8_t)(sizeof(nwk_header_t)); // No payload for link messages
+            response.nwk_header.port.app_port = NWK_PORT_LINK;
+            response.nwk_header.device_info.ack_reply = 1;
+            response.nwk_header.tractid = frame->nwk_header.tractid; // Echo back TID from request
+            simpliciti_status_t status = simpliciti_send_msg(context, &response, true, false);
+            if (status != SIMPLICITI_SUCCESS)
+            {
+                TRACE("Failed to send ACK for link request: %d\n", status);
+                return status;
+            }
+            
+            // Update link state to connected
+            TRACE("Established link with 0x%08X\n", frame->mfri_header.srcaddr);
+            context->link_info.link_state = SIMPLICITI_LINK_STATE_CONNECTED;
+            context->link_info.dest_address = frame->mfri_header.srcaddr;
+            if (context->callbacks.link_state_change != NULL)
+            {
+                context->callbacks.link_state_change(SIMPLICITI_LINK_STATE_CONNECTED);
+            }
+        }
+        else
+        {
+            TRACE("Received unexpected link message from 0x%08X in link state %d\n", frame->mfri_header.srcaddr, context->link_info.link_state);
+            return SIMPLICITI_ERROR_INVALID_PARAM;
+        }
+    }
     return SIMPLICITI_SUCCESS;
 }
 
 static simpliciti_status_t simpliciti_handle_app_message(simpliciti_context_t *context, const simpliciti_frame_t *frame)
 {
     TRACE("Received message on port %u\n", frame->nwk_header.port.app_port);
-    // Handle application-level messages
+    if (context->callbacks.handle_app_message == NULL)
+    {
+        TRACE("No handle_app_message callback registered in context\n");
+        return SIMPLICITI_ERROR_INVALID_PARAM;
+    }
+    context->callbacks.handle_app_message(frame);
     return SIMPLICITI_SUCCESS;
 }
 
@@ -292,15 +381,6 @@ static simpliciti_status_t simpliciti_handle_packet(simpliciti_context_t *contex
         return SIMPLICITI_ERROR_INVALID_PARAM;
     }
 
-    // Check dstaddr in MFRI header matches device address in context
-    if ((frame->mfri_header.dstaddr != context->device_address) &&
-        (frame->mfri_header.dstaddr != SIMPLICITI_BROADCAST_PORT)) // Allow broadcast address
-    {
-        TRACE("Received frame with destination address 0x%08X does not match device address 0x%08X\n",
-              frame->mfri_header.dstaddr, context->device_address);
-        return SIMPLICITI_ERROR_INVALID_PARAM;
-    }
-
     // Route by port
     if (frame->nwk_header.port.app_port <= SIMPLICITI_MAX_RESERVED_PORT)
     {
@@ -309,11 +389,6 @@ static simpliciti_status_t simpliciti_handle_packet(simpliciti_context_t *contex
     else if (frame->nwk_header.port.app_port <= SIMPLICITI_MAX_APP_PORT)
     {
         return simpliciti_handle_app_message(context, frame);
-    }
-    else if (frame->nwk_header.port.app_port == SIMPLICITI_BROADCAST_PORT)
-    {
-        TRACE("Received broadcast message on port %u\n", frame->nwk_header.port.app_port);
-        // Handle broadcast messages
     }
     else
     {
@@ -333,7 +408,18 @@ simpliciti_status_t simpliciti_receive_msg(simpliciti_context_t *context, const 
         TRACE("Failed to decode received frame: %d\n", status);
         return status;
     }
-
+    if (context->link_info.link_state != SIMPLICITI_LINK_STATE_CONNECTED &&
+        context->link_info.link_state != SIMPLICITI_LINK_STATE_LINK_REQUESTED &&
+        frame.mfri_header.dstaddr != SIMPLICITI_BROADCAST_ADDRESS)
+    {
+        TRACE("Cannot receive message, link is not connected\n");
+        return SIMPLICITI_ERROR_INVALID_PARAM;
+    }
+    if (context->device_address != frame.mfri_header.dstaddr && frame.mfri_header.dstaddr != SIMPLICITI_BROADCAST_ADDRESS)
+    {
+        TRACE("Received message intended for 0x%08X, but device address is 0x%08X\n", frame.mfri_header.dstaddr, context->device_address);
+        return SIMPLICITI_ERROR_INVALID_PARAM;
+    }
     status = simpliciti_handle_packet(context, &frame);
     if (status != SIMPLICITI_SUCCESS)
     {
@@ -344,7 +430,11 @@ simpliciti_status_t simpliciti_receive_msg(simpliciti_context_t *context, const 
     // Message was a reply to a message we sent that requires ACK; clear pending message
     if (frame.nwk_header.device_info.ack_reply)
     {
+        if (g_pending_msgs[frame.nwk_header.tractid].in_use)
+        {
+            TRACE("Received ACK for TID %u, clearing pending message\n", frame.nwk_header.tractid);
         g_pending_msgs[frame.nwk_header.tractid].in_use = false;
+        }
     }
     return SIMPLICITI_SUCCESS;
 }
@@ -362,4 +452,100 @@ simpliciti_status_t simpliciti_send_ping(simpliciti_context_t *context, uint32_t
     memcpy(frame.payload, &ping_payload, sizeof(simpliciti_ping_payload_t));
 
     return simpliciti_send_msg(context, &frame, false, false);
+}
+
+simpliciti_status_t simpliciti_send_link(simpliciti_context_t *context)
+{
+    if (!context)
+    {
+        TRACE("Null pointer provided for context\n");
+        return SIMPLICITI_ERROR_INVALID_PARAM;
+    }
+    if (context->link_info.link_state != SIMPLICITI_LINK_STATE_DISCONNECTED)
+    {
+        TRACE("Cannot send link message: already in link state %d\n", context->link_info.link_state);
+        return SIMPLICITI_ERROR_INVALID_PARAM;
+    }
+
+    simpliciti_frame_t frame = {};
+    frame.mfri_header.dstaddr = SIMPLICITI_BROADCAST_ADDRESS; // Broadcast link requests
+    frame.mfri_header.srcaddr = context->device_address;
+    frame.mfri_header.length = (uint8_t)(sizeof(nwk_header_t)); // No payload for link messages
+    frame.nwk_header.port.app_port = NWK_PORT_LINK;
+    frame.nwk_header.device_info.ack_req = true;
+    simpliciti_status_t status = simpliciti_send_msg(context, &frame, false, false);
+    if (status == SIMPLICITI_SUCCESS)
+    {
+        context->link_info.link_state = SIMPLICITI_LINK_STATE_LINK_REQUESTED;
+        TRACE("Sent link request message, updated link state to LINK_REQUESTED\n");
+        if (context->callbacks.link_state_change != NULL)
+        {
+            context->callbacks.link_state_change(SIMPLICITI_LINK_STATE_LINK_REQUESTED);
+        }
+    }
+    else
+    {
+        TRACE("Failed to send link request message: %d\n", status);
+    }
+    return status;
+}
+
+simpliciti_status_t simpliciti_wait_for_link(simpliciti_context_t *context)
+{
+    if (!context)
+    {
+        TRACE("Null pointer provided for context\n");
+        return SIMPLICITI_ERROR_INVALID_PARAM;
+    }
+    if (context->link_info.link_state != SIMPLICITI_LINK_STATE_DISCONNECTED)
+    {
+        TRACE("Cannot wait for link: already in link state %d\n", context->link_info.link_state);
+        return SIMPLICITI_ERROR_INVALID_PARAM;
+    }
+    context->link_info.link_state = SIMPLICITI_LINK_STATE_WAITING_FOR_LINK;
+    TRACE("Set link state to WAITING_FOR_LINK, waiting for incoming link requests\n");
+    if (context->callbacks.link_state_change != NULL)
+    {
+        context->callbacks.link_state_change(SIMPLICITI_LINK_STATE_WAITING_FOR_LINK);
+    }
+    return SIMPLICITI_SUCCESS;
+}
+
+simpliciti_status_t simpliciti_disconnect(simpliciti_context_t *context)
+{
+    if (!context)
+    {
+        TRACE("Null pointer provided for context\n");
+        return SIMPLICITI_ERROR_INVALID_PARAM;
+    }
+    if (context->link_info.link_state != SIMPLICITI_LINK_STATE_CONNECTED)
+    {
+        TRACE("Not connected, no action taken\n");
+        return SIMPLICITI_SUCCESS;
+    }
+    
+    simpliciti_frame_t frame = {};
+    frame.mfri_header.dstaddr = context->link_info.dest_address;
+    frame.mfri_header.srcaddr = context->device_address;
+    frame.nwk_header.port.app_port = NWK_PORT_UNLINK;
+    frame.nwk_header.device_info.ack_req = false;
+    frame.mfri_header.length = (uint8_t)(sizeof(nwk_header_t)); // No payload for unlink messages
+    simpliciti_status_t status = simpliciti_send_msg(context, &frame, false, false);
+    if (status != SIMPLICITI_SUCCESS)
+    {
+        TRACE("Failed to send unlink message: %d\n", status);
+        return status;
+    }
+
+    context->link_info.link_state = SIMPLICITI_LINK_STATE_DISCONNECTED;
+    context->link_info.dest_address = 0;
+    TRACE("Set link state to DISCONNECTED\n");
+
+    if (context->callbacks.link_state_change != NULL)
+    {
+        context->callbacks.link_state_change(SIMPLICITI_LINK_STATE_DISCONNECTED);
+    }
+
+    return SIMPLICITI_SUCCESS;
+
 }

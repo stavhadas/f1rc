@@ -13,7 +13,8 @@
 typedef enum
 {
     NWK_PORT_PING = 1,
-    NWK_PORT_LINK = 2
+    NWK_PORT_LINK = 2,
+    NWK_PORT_UNLINK = 3
 } nwk_app_port_t;
 
 typedef struct __attribute__((packed))

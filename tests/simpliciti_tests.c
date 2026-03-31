@@ -622,6 +622,13 @@ static simpliciti_status_t test_get_time_fail_cb(uint32_t *ts)
     return SIMPLICITI_ERROR_INVALID_PARAM;
 }
 
+// Sets context to CONNECTED with the given peer (simulates a pre-established link).
+static void set_connected(simpliciti_context_t *ctx, uint32_t peer_addr)
+{
+    ctx->link_info.link_state   = SIMPLICITI_LINK_STATE_CONNECTED;
+    ctx->link_info.dest_address = peer_addr;
+}
+
 // Resets all shared state, inits the context, and returns it ready to use.
 // Every test using send_msg/receive_msg must call this to isolate g_pending_msgs.
 static simpliciti_context_t make_test_context(uint32_t addr)
@@ -706,6 +713,7 @@ TEST(SimplictiPing, ReceiveRequestTriggersReply)
     const uint32_t my_addr   = 0xAABBCCDD;
     const uint32_t peer_addr = 0x11223344;
     simpliciti_context_t ctx = make_test_context(my_addr);
+    set_connected(&ctx, peer_addr);
 
     uint8_t ping_payload[] = {NWK_PORT_PING_REQUEST};
     uint8_t wire[SIMPLICITI_MAX_FRAME_SIZE];
@@ -724,12 +732,14 @@ TEST(SimplictiPing, ReceiveRequestTriggersReply)
 // Receiving a ping response does not trigger a further send
 TEST(SimplictiPing, ReceiveResponseNoExtraSend)
 {
-    const uint32_t my_addr = 0xAABBCCDD;
+    const uint32_t my_addr   = 0xAABBCCDD;
+    const uint32_t peer_addr = 0x11223344;
     simpliciti_context_t ctx = make_test_context(my_addr);
+    set_connected(&ctx, peer_addr);
 
     uint8_t ping_payload[] = {NWK_PORT_PING_RESPONSE};
     uint8_t wire[SIMPLICITI_MAX_FRAME_SIZE];
-    size_t len = build_simpliciti_frame(my_addr, 0x11223344, 0x01, 0x00, 0x01,
+    size_t len = build_simpliciti_frame(my_addr, peer_addr, 0x01, 0x00, 0x01,
                                         ping_payload, sizeof(ping_payload), wire);
 
     ASSERT_EQ(simpliciti_receive_msg(&ctx, wire, len), SIMPLICITI_SUCCESS);
@@ -812,6 +822,7 @@ TEST(PendingMsg, ClearedOnAckReply)
     const uint32_t my_addr   = 0xAABBCCDD;
     const uint32_t peer_addr = 0x11223344;
     simpliciti_context_t ctx = make_test_context(my_addr);
+    set_connected(&ctx, peer_addr);
 
     ASSERT_EQ(simpliciti_send_ping(&ctx, peer_addr), SIMPLICITI_SUCCESS);
     uint8_t assigned_tid = g_sent_buf[PING_WIRE_TRACTID_OFFSET];
@@ -897,4 +908,315 @@ TEST(Retry, StopsAfterMaxRetries)
     ASSERT_EQ(simpliciti_check_outgoing_messages(&ctx), SIMPLICITI_SUCCESS);
     EXPECT_EQ(g_send_count, count_at_exhaustion) << "dropped after max retries";
 }
-    
+
+// ===========================================================================
+// SimpliciTI — Link
+// ===========================================================================
+
+#define LINK_WIRE_PORT_OFFSET    (9)
+#define LINK_WIRE_DI_OFFSET      (10)
+#define LINK_WIRE_TRACTID_OFFSET (11)
+
+static simpliciti_link_state_t g_last_link_state = SIMPLICITI_LINK_STATE_DISCONNECTED;
+static int                     g_link_cb_count   = 0;
+
+static simpliciti_status_t test_link_state_cb(simpliciti_link_state_t state)
+{
+    g_last_link_state = state;
+    g_link_cb_count++;
+    return SIMPLICITI_SUCCESS;
+}
+
+// Returns a DISCONNECTED context with the link_state_change callback wired up.
+static simpliciti_context_t make_link_context(uint32_t addr)
+{
+    g_last_link_state = SIMPLICITI_LINK_STATE_DISCONNECTED;
+    g_link_cb_count   = 0;
+    simpliciti_context_t ctx = make_test_context(addr);
+    ctx.callbacks.link_state_change = test_link_state_cb;
+    return ctx;
+}
+
+// --- send_link ---
+
+// send_link broadcasts a link request and transitions state to LINK_REQUESTED
+TEST(SimplictiLink, SendLink_StateBecomesRequested)
+{
+    simpliciti_context_t ctx = make_link_context(0xAABBCCDD);
+    ASSERT_EQ(simpliciti_send_link(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(ctx.link_info.link_state, SIMPLICITI_LINK_STATE_LINK_REQUESTED);
+}
+
+// send_link wire: dst=broadcast, port=NWK_PORT_LINK, ack_req set
+TEST(SimplictiLink, SendLink_WireFrame)
+{
+    simpliciti_context_t ctx = make_link_context(0xAABBCCDD);
+    ASSERT_EQ(simpliciti_send_link(&ctx), SIMPLICITI_SUCCESS);
+
+    uint32_t dst;
+    memcpy(&dst, g_sent_buf + 1, 4);
+    EXPECT_EQ(dst, SIMPLICITI_BROADCAST_ADDRESS)                               << "link request must be broadcast";
+    EXPECT_EQ(g_sent_buf[LINK_WIRE_PORT_OFFSET], (uint8_t)NWK_PORT_LINK)      << "port=LINK";
+    EXPECT_EQ(g_sent_buf[LINK_WIRE_DI_OFFSET] & DI_ACK_REQ_WIRE, DI_ACK_REQ_WIRE) << "ack_req set";
+}
+
+// send_link fires link_state_change callback with LINK_REQUESTED
+TEST(SimplictiLink, SendLink_FiresCallback)
+{
+    simpliciti_context_t ctx = make_link_context(0xAABBCCDD);
+    ASSERT_EQ(simpliciti_send_link(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_last_link_state, SIMPLICITI_LINK_STATE_LINK_REQUESTED);
+    EXPECT_EQ(g_link_cb_count, 1);
+}
+
+// send_link fails if already in any non-DISCONNECTED state
+TEST(SimplictiLink, SendLink_FailsIfNotDisconnected)
+{
+    simpliciti_context_t ctx = make_link_context(0xAABBCCDD);
+    ASSERT_EQ(simpliciti_send_link(&ctx), SIMPLICITI_SUCCESS); // → LINK_REQUESTED
+    EXPECT_NE(simpliciti_send_link(&ctx), SIMPLICITI_SUCCESS)  << "reject when LINK_REQUESTED";
+
+    ctx = make_link_context(0xAABBCCDD);
+    set_connected(&ctx, 0x11223344);
+    EXPECT_NE(simpliciti_send_link(&ctx), SIMPLICITI_SUCCESS)  << "reject when CONNECTED";
+}
+
+// --- wait_for_link ---
+
+// wait_for_link transitions to WAITING_FOR_LINK without sending any frame
+TEST(SimplictiLink, WaitForLink_StateBecomesWaiting)
+{
+    simpliciti_context_t ctx = make_link_context(0xAABBCCDD);
+    ASSERT_EQ(simpliciti_wait_for_link(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(ctx.link_info.link_state, SIMPLICITI_LINK_STATE_WAITING_FOR_LINK);
+    EXPECT_EQ(g_send_count, 0) << "wait_for_link must not send a frame";
+}
+
+// wait_for_link fires link_state_change callback with WAITING_FOR_LINK
+TEST(SimplictiLink, WaitForLink_FiresCallback)
+{
+    simpliciti_context_t ctx = make_link_context(0xAABBCCDD);
+    ASSERT_EQ(simpliciti_wait_for_link(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_last_link_state, SIMPLICITI_LINK_STATE_WAITING_FOR_LINK);
+    EXPECT_EQ(g_link_cb_count, 1);
+}
+
+// wait_for_link fails if not DISCONNECTED
+TEST(SimplictiLink, WaitForLink_FailsIfNotDisconnected)
+{
+    simpliciti_context_t ctx = make_link_context(0xAABBCCDD);
+    ASSERT_EQ(simpliciti_wait_for_link(&ctx), SIMPLICITI_SUCCESS); // → WAITING
+    EXPECT_NE(simpliciti_wait_for_link(&ctx), SIMPLICITI_SUCCESS)  << "reject when WAITING_FOR_LINK";
+
+    ctx = make_link_context(0xAABBCCDD);
+    set_connected(&ctx, 0x11223344);
+    EXPECT_NE(simpliciti_wait_for_link(&ctx), SIMPLICITI_SUCCESS)  << "reject when CONNECTED";
+}
+
+// --- Server-side: receive link request while WAITING_FOR_LINK ---
+
+// Server receives a broadcast link request → sends ACK, becomes CONNECTED
+TEST(SimplictiLink, Server_ReceivesLinkRequest_BecomesConnected)
+{
+    const uint32_t server_addr = 0xAABBCCDD;
+    const uint32_t client_addr = 0x11223344;
+    simpliciti_context_t ctx = make_link_context(server_addr);
+    ASSERT_EQ(simpliciti_wait_for_link(&ctx), SIMPLICITI_SUCCESS);
+    g_send_count = 0;
+
+    uint8_t wire[SIMPLICITI_MAX_FRAME_SIZE];
+    size_t len = build_simpliciti_frame(SIMPLICITI_BROADCAST_ADDRESS, client_addr,
+                                        NWK_PORT_LINK, DI_ACK_REQ_WIRE, 0x01,
+                                        nullptr, 0, wire);
+    ASSERT_EQ(simpliciti_receive_msg(&ctx, wire, len), SIMPLICITI_SUCCESS);
+
+    EXPECT_EQ(ctx.link_info.link_state,   SIMPLICITI_LINK_STATE_CONNECTED);
+    EXPECT_EQ(ctx.link_info.dest_address, client_addr);
+}
+
+// Server's ACK: ack_reply=1, tractid echoed, unicast back to client
+TEST(SimplictiLink, Server_ReceivesLinkRequest_AckCorrect)
+{
+    const uint32_t server_addr = 0xAABBCCDD;
+    const uint32_t client_addr = 0x11223344;
+    const uint8_t  req_tid     = 0x07;
+    simpliciti_context_t ctx = make_link_context(server_addr);
+    ASSERT_EQ(simpliciti_wait_for_link(&ctx), SIMPLICITI_SUCCESS);
+    g_send_count = 0;
+
+    uint8_t wire[SIMPLICITI_MAX_FRAME_SIZE];
+    size_t len = build_simpliciti_frame(SIMPLICITI_BROADCAST_ADDRESS, client_addr,
+                                        NWK_PORT_LINK, DI_ACK_REQ_WIRE, req_tid,
+                                        nullptr, 0, wire);
+    ASSERT_EQ(simpliciti_receive_msg(&ctx, wire, len), SIMPLICITI_SUCCESS);
+
+    EXPECT_EQ(g_send_count, 1)                                                      << "server sends one ACK";
+    uint32_t reply_dst;
+    memcpy(&reply_dst, g_sent_buf + 1, 4);
+    EXPECT_EQ(reply_dst, client_addr)                                               << "ACK sent to client";
+    EXPECT_EQ(g_sent_buf[LINK_WIRE_PORT_OFFSET], (uint8_t)NWK_PORT_LINK)           << "port=LINK";
+    EXPECT_EQ(g_sent_buf[LINK_WIRE_DI_OFFSET] & DI_ACK_REPLY_WIRE, DI_ACK_REPLY_WIRE) << "ack_reply set";
+    EXPECT_EQ(g_sent_buf[LINK_WIRE_TRACTID_OFFSET], req_tid)                       << "tractid echoed";
+}
+
+// Server fires link_state_change callback with CONNECTED
+TEST(SimplictiLink, Server_ReceivesLinkRequest_FiresCallback)
+{
+    const uint32_t server_addr = 0xAABBCCDD;
+    const uint32_t client_addr = 0x11223344;
+    simpliciti_context_t ctx = make_link_context(server_addr);
+    ASSERT_EQ(simpliciti_wait_for_link(&ctx), SIMPLICITI_SUCCESS);
+    g_link_cb_count = 0;
+
+    uint8_t wire[SIMPLICITI_MAX_FRAME_SIZE];
+    size_t len = build_simpliciti_frame(SIMPLICITI_BROADCAST_ADDRESS, client_addr,
+                                        NWK_PORT_LINK, DI_ACK_REQ_WIRE, 0x01,
+                                        nullptr, 0, wire);
+    ASSERT_EQ(simpliciti_receive_msg(&ctx, wire, len), SIMPLICITI_SUCCESS);
+
+    EXPECT_EQ(g_last_link_state, SIMPLICITI_LINK_STATE_CONNECTED);
+    EXPECT_GE(g_link_cb_count, 1);
+}
+
+// Link request while not WAITING_FOR_LINK is rejected by handle_link
+TEST(SimplictiLink, Server_ReceivesLinkRequest_WhileDisconnected_Rejected)
+{
+    simpliciti_context_t ctx = make_link_context(0xAABBCCDD);
+    // DISCONNECTED + broadcast passes receive_msg gate but handle_link rejects it
+
+    uint8_t wire[SIMPLICITI_MAX_FRAME_SIZE];
+    size_t len = build_simpliciti_frame(SIMPLICITI_BROADCAST_ADDRESS, 0x11223344,
+                                        NWK_PORT_LINK, DI_ACK_REQ_WIRE, 0x01,
+                                        nullptr, 0, wire);
+    EXPECT_NE(simpliciti_receive_msg(&ctx, wire, len), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_send_count, 0);
+}
+
+// --- Client-side: receive link ACK while LINK_REQUESTED ---
+
+// Client sends link, receives ACK → CONNECTED, dest_address set
+TEST(SimplictiLink, Client_ReceivesLinkAck_BecomesConnected)
+{
+    const uint32_t client_addr = 0xAABBCCDD;
+    const uint32_t server_addr = 0x11223344;
+    simpliciti_context_t ctx = make_link_context(client_addr);
+    ASSERT_EQ(simpliciti_send_link(&ctx), SIMPLICITI_SUCCESS);
+    uint8_t sent_tid = g_sent_buf[LINK_WIRE_TRACTID_OFFSET];
+    g_send_count = 0;
+
+    uint8_t wire[SIMPLICITI_MAX_FRAME_SIZE];
+    size_t len = build_simpliciti_frame(client_addr, server_addr,
+                                        NWK_PORT_LINK, DI_ACK_REPLY_WIRE, sent_tid,
+                                        nullptr, 0, wire);
+    ASSERT_EQ(simpliciti_receive_msg(&ctx, wire, len), SIMPLICITI_SUCCESS);
+
+    EXPECT_EQ(ctx.link_info.link_state,   SIMPLICITI_LINK_STATE_CONNECTED);
+    EXPECT_EQ(ctx.link_info.dest_address, server_addr);
+    EXPECT_EQ(g_send_count, 0) << "no additional frame sent on ACK receipt";
+}
+
+// Client fires link_state_change callback with CONNECTED after ACK
+TEST(SimplictiLink, Client_ReceivesLinkAck_FiresCallback)
+{
+    const uint32_t client_addr = 0xAABBCCDD;
+    const uint32_t server_addr = 0x11223344;
+    simpliciti_context_t ctx = make_link_context(client_addr);
+    ASSERT_EQ(simpliciti_send_link(&ctx), SIMPLICITI_SUCCESS);
+    uint8_t sent_tid = g_sent_buf[LINK_WIRE_TRACTID_OFFSET];
+    g_link_cb_count = 0;
+
+    uint8_t wire[SIMPLICITI_MAX_FRAME_SIZE];
+    size_t len = build_simpliciti_frame(client_addr, server_addr,
+                                        NWK_PORT_LINK, DI_ACK_REPLY_WIRE, sent_tid,
+                                        nullptr, 0, wire);
+    ASSERT_EQ(simpliciti_receive_msg(&ctx, wire, len), SIMPLICITI_SUCCESS);
+
+    EXPECT_EQ(g_last_link_state, SIMPLICITI_LINK_STATE_CONNECTED);
+    EXPECT_GE(g_link_cb_count, 1);
+}
+
+// Pending link message is cleared after ACK — no retransmit occurs
+TEST(SimplictiLink, Client_ReceivesLinkAck_ClearsPendingMsg)
+{
+    const uint32_t client_addr = 0xAABBCCDD;
+    const uint32_t server_addr = 0x11223344;
+    simpliciti_context_t ctx = make_link_context(client_addr);
+    ASSERT_EQ(simpliciti_send_link(&ctx), SIMPLICITI_SUCCESS);
+    uint8_t sent_tid = g_sent_buf[LINK_WIRE_TRACTID_OFFSET];
+
+    uint8_t wire[SIMPLICITI_MAX_FRAME_SIZE];
+    size_t len = build_simpliciti_frame(client_addr, server_addr,
+                                        NWK_PORT_LINK, DI_ACK_REPLY_WIRE, sent_tid,
+                                        nullptr, 0, wire);
+    ASSERT_EQ(simpliciti_receive_msg(&ctx, wire, len), SIMPLICITI_SUCCESS);
+
+    int count_before = g_send_count;
+    g_mock_time = SIMPLICITI_ACK_TIMEOUT_MS + 1;
+    ASSERT_EQ(simpliciti_check_outgoing_messages(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_send_count, count_before) << "pending msg cleared, no retransmit";
+}
+
+// --- Disconnect ---
+
+// disconnect sends unlink frame to peer and transitions to DISCONNECTED
+TEST(SimplictiLink, Disconnect_SendsUnlinkAndBecomesDisconnected)
+{
+    const uint32_t my_addr   = 0xAABBCCDD;
+    const uint32_t peer_addr = 0x11223344;
+    simpliciti_context_t ctx = make_link_context(my_addr);
+    set_connected(&ctx, peer_addr);
+
+    ASSERT_EQ(simpliciti_disconnect(&ctx), SIMPLICITI_SUCCESS);
+
+    EXPECT_EQ(ctx.link_info.link_state,   SIMPLICITI_LINK_STATE_DISCONNECTED);
+    EXPECT_EQ(ctx.link_info.dest_address, 0u);
+    EXPECT_EQ(g_send_count, 1) << "one unlink frame sent";
+    uint32_t unlink_dst;
+    memcpy(&unlink_dst, g_sent_buf + 1, 4);
+    EXPECT_EQ(unlink_dst, peer_addr)                                             << "unlink addressed to peer";
+    EXPECT_EQ(g_sent_buf[LINK_WIRE_PORT_OFFSET], (uint8_t)NWK_PORT_UNLINK)      << "port=UNLINK";
+}
+
+// disconnect fires link_state_change callback with DISCONNECTED
+TEST(SimplictiLink, Disconnect_FiresCallback)
+{
+    simpliciti_context_t ctx = make_link_context(0xAABBCCDD);
+    set_connected(&ctx, 0x11223344);
+    g_link_cb_count = 0;
+
+    ASSERT_EQ(simpliciti_disconnect(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_last_link_state, SIMPLICITI_LINK_STATE_DISCONNECTED);
+    EXPECT_EQ(g_link_cb_count, 1);
+}
+
+// disconnect when not connected is a no-op — no frame sent, returns SUCCESS
+TEST(SimplictiLink, Disconnect_WhenNotConnected_IsNoOp)
+{
+    simpliciti_context_t ctx = make_link_context(0xAABBCCDD);
+    EXPECT_EQ(simpliciti_disconnect(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_send_count, 0) << "no frame sent when not connected";
+}
+
+// --- Retry exhaustion for link messages ---
+
+// After MAX_RETRIES retransmits + one exhaustion check, link state becomes DISCONNECTED
+TEST(SimplictiLink, LinkRetryExhausted_BecomesDisconnected)
+{
+    simpliciti_context_t ctx = make_link_context(0xAABBCCDD);
+    ASSERT_EQ(simpliciti_send_link(&ctx), SIMPLICITI_SUCCESS);
+    g_link_cb_count = 0;
+
+    // Drain all retries (each timeout retransmits until retries reaches 0)
+    for (int i = 0; i < SIMPLICITI_MAX_RETRIES; i++)
+    {
+        g_mock_time += SIMPLICITI_ACK_TIMEOUT_MS + 1;
+        ASSERT_EQ(simpliciti_check_outgoing_messages(&ctx), SIMPLICITI_SUCCESS);
+    }
+    // One more timeout triggers the exhaustion path
+    g_mock_time += SIMPLICITI_ACK_TIMEOUT_MS + 1;
+    ASSERT_EQ(simpliciti_check_outgoing_messages(&ctx), SIMPLICITI_SUCCESS);
+
+    EXPECT_EQ(ctx.link_info.link_state, SIMPLICITI_LINK_STATE_DISCONNECTED);
+    EXPECT_EQ(g_last_link_state,        SIMPLICITI_LINK_STATE_DISCONNECTED);
+    EXPECT_GE(g_link_cb_count, 1);
+}
