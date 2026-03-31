@@ -178,7 +178,7 @@ simpliciti_status_t simpliciti_check_outgoing_messages(simpliciti_context_t *con
                     else
                     {
                         TRACE("Message with TID %zu failed after maximum retries\n", i);
-                        //TODO: Notify application layer of failure if desired
+                        // TODO: Notify application layer of failure if desired
                         memset(&g_pending_msgs[i], 0, sizeof(simpliciti_outgoing_msg_t));
                     }
                 }
@@ -190,7 +190,6 @@ simpliciti_status_t simpliciti_check_outgoing_messages(simpliciti_context_t *con
             }
         }
     }
-    
 }
 
 static simpliciti_status_t simpliciti_handle_ping(simpliciti_context_t *context, const simpliciti_frame_t *frame)
@@ -203,7 +202,7 @@ static simpliciti_status_t simpliciti_handle_ping(simpliciti_context_t *context,
     simpliciti_ping_payload_t *ping_payload = (simpliciti_ping_payload_t *)frame->payload;
     switch (ping_payload->request)
     {
-        case NWK_PORT_PING_REQUEST:
+    case NWK_PORT_PING_REQUEST:
         simpliciti_frame_t response = {0};
         TRACE("Received ping message from 0x%08X with TID %u\n", frame->mfri_header.srcaddr, frame->nwk_header.tractid);
 
@@ -217,15 +216,36 @@ static simpliciti_status_t simpliciti_handle_ping(simpliciti_context_t *context,
 
         // Set response payload
         simpliciti_ping_payload_t response_payload = {
-            .request = NWK_PORT_PING_RESPONSE
-        };
+            .request = NWK_PORT_PING_RESPONSE};
         memcpy(response.payload, &response_payload, sizeof(simpliciti_ping_payload_t));
 
         // Send response
         return simpliciti_send_msg(context, &response, true, false);
         break;
     case NWK_PORT_PING_RESPONSE:
-        //TODO: Implement handling of received ping response, e.g. notify application layer or update state
+        if (g_pending_msgs[frame->nwk_header.tractid].in_use)
+        {
+            TRACE("Received ping response from 0x%08X with TID %u\n", frame->mfri_header.srcaddr, frame->nwk_header.tractid);
+            uint32_t now = 0;
+            if (context->callbacks.get_time_ms && context->callbacks.get_time_ms(&now) == SIMPLICITI_SUCCESS)
+            {
+                uint32_t rtt = now - context->last_ping_timestamp;
+                TRACE("Ping RTT: %u ms\n", rtt);
+                if (context->callbacks.successful_ping != NULL)
+                {
+                    context->callbacks.successful_ping(frame->mfri_header.srcaddr, rtt);
+                }
+            }
+            else
+            {
+                TRACE("get_time_ms callback failed, cannot calculate ping RTT\n");
+            }
+        }
+        else
+        {
+            TRACE("Received unexpected ping response from 0x%08X with TID %u\n", frame->mfri_header.srcaddr, frame->nwk_header.tractid);
+        }
+        // TODO: Implement handling of received ping response, e.g. notify application layer or update state
         break;
     default:
         TRACE("Unknown ping request type: %u\n", ping_payload->request);
@@ -332,14 +352,13 @@ simpliciti_status_t simpliciti_receive_msg(simpliciti_context_t *context, const 
 simpliciti_status_t simpliciti_send_ping(simpliciti_context_t *context, uint32_t dest_address)
 {
     simpliciti_frame_t frame = {};
-    frame.mfri_header.dstaddr      = dest_address;
-    frame.mfri_header.srcaddr      = context->device_address;
-    frame.mfri_header.length       = (uint8_t)(sizeof(nwk_header_t) + sizeof(simpliciti_ping_payload_t));
+    frame.mfri_header.dstaddr = dest_address;
+    frame.mfri_header.srcaddr = context->device_address;
+    frame.mfri_header.length = (uint8_t)(sizeof(nwk_header_t) + sizeof(simpliciti_ping_payload_t));
     frame.nwk_header.device_info.ack_req = true; // Request ACK for ping messages
     frame.nwk_header.port.app_port = NWK_PORT_PING;
     simpliciti_ping_payload_t ping_payload = {
-        .request = NWK_PORT_PING_REQUEST
-    };
+        .request = NWK_PORT_PING_REQUEST};
     memcpy(frame.payload, &ping_payload, sizeof(simpliciti_ping_payload_t));
 
     return simpliciti_send_msg(context, &frame, false, false);

@@ -45,12 +45,14 @@ typedef struct
 typedef simpliciti_status_t (*simpliciti_send_msg_cb_t)(const uint8_t *buffer, size_t length);
 typedef simpliciti_status_t (*simpliciti_handle_app_message_cb_t)(const simpliciti_frame_t *frame);
 typedef simpliciti_status_t (*simpliciti_get_time_ms_cb_t)(uint32_t *timestamp);
+typedef simpliciti_status_t (*simpliciti_successfull_ping_cb_t)(uint32_t src_address, uint32_t timestamp);
 
 typedef struct
 {
     simpliciti_send_msg_cb_t send_msg;
     simpliciti_handle_app_message_cb_t handle_app_message;
     simpliciti_get_time_ms_cb_t get_time_ms;
+    simpliciti_successfull_ping_cb_t successful_ping;
 } simpliciti_callbacks_t;
 
 typedef struct
@@ -68,6 +70,7 @@ typedef struct
     uint32_t device_address;
     simpliciti_link_info_t link_info;
     uint8_t last_tid;
+    uint32_t last_ping_timestamp;
 } simpliciti_context_t;
 
 
