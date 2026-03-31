@@ -569,3 +569,332 @@ TEST(SimplictiRoundTrip, BasicFrame)
     EXPECT_EQ(rx.nwk_header.tractid,                tx.nwk_header.tractid);
     EXPECT_EQ(memcmp(rx.payload, payload, sizeof(payload)), 0);
 }
+
+// ===========================================================================
+// Context API — shared test helpers
+// ===========================================================================
+//
+// Ping payload layout (spec section 4.1):
+//   Byte 0: app_info  — NWK_PORT_PING_REQUEST (0x01) or NWK_PORT_PING_RESPONSE (0x80)
+//   Byte 1: TID       — echoed by responder
+//
+// Full ping wire layout:
+//   [0]    : mfri_length = NWK_HEADER_SIZE + sizeof(simpliciti_ping_payload_t)
+//   [1-4]  : dstaddr (LE)
+//   [5-8]  : srcaddr (LE)
+//   [9]    : NWK port byte = 0x01
+//   [10]   : device_info
+//   [11]   : tractid  (auto-assigned by send_msg; sole TID — no duplicate in payload)
+//   [12]   : app_info (request / response)
+
+#define PING_WIRE_PORT_OFFSET     (9)
+#define PING_WIRE_DI_OFFSET       (10)
+#define PING_WIRE_TRACTID_OFFSET  (11)
+#define PING_WIRE_APP_INFO_OFFSET (12)
+
+// device_info wire byte: ack_reply=1 → (0<<7)|(0<<6)|(0<<4)|(1<<3)|0 = 0x08
+#define DI_ACK_REPLY_WIRE (0x08u)
+// device_info wire byte: ack_req=1  → (1<<7)|(0<<6)|(0<<4)|(0<<3)|0 = 0x80
+#define DI_ACK_REQ_WIRE   (0x80u)
+
+static uint8_t  g_sent_buf[SIMPLICITI_MAX_FRAME_SIZE];
+static size_t   g_sent_len   = 0;
+static int      g_send_count = 0;
+static uint32_t g_mock_time  = 0;
+
+static simpliciti_status_t test_send_cb(const uint8_t *buf, size_t len)
+{
+    memcpy(g_sent_buf, buf, len);
+    g_sent_len = len;
+    g_send_count++;
+    return SIMPLICITI_SUCCESS;
+}
+
+static simpliciti_status_t test_get_time_cb(uint32_t *ts)
+{
+    *ts = g_mock_time;
+    return SIMPLICITI_SUCCESS;
+}
+
+static simpliciti_status_t test_get_time_fail_cb(uint32_t *ts)
+{
+    (void)ts;
+    return SIMPLICITI_ERROR_INVALID_PARAM;
+}
+
+// Resets all shared state, inits the context, and returns it ready to use.
+// Every test using send_msg/receive_msg must call this to isolate g_pending_msgs.
+static simpliciti_context_t make_test_context(uint32_t addr)
+{
+    g_sent_len   = 0;
+    g_send_count = 0;
+    g_mock_time  = 0;
+    simpliciti_context_t ctx = {};
+    simpliciti_init(&ctx);
+    ctx.device_address        = addr;
+    ctx.callbacks.send_msg    = test_send_cb;
+    ctx.callbacks.get_time_ms = test_get_time_cb;
+    return ctx;
+}
+
+// Build a ping reply frame. tractid is NOT set — send_msg auto-assigns it.
+// For sending a ping REQUEST, use simpliciti_send_ping() instead.
+static simpliciti_frame_t make_ping_frame(uint32_t dst, uint32_t src, uint8_t app_info)
+{
+    simpliciti_frame_t frame = {};
+    frame.mfri_header.dstaddr      = dst;
+    frame.mfri_header.srcaddr      = src;
+    frame.mfri_header.length       = (uint8_t)(sizeof(nwk_header_t) +
+                                               sizeof(simpliciti_ping_payload_t));
+    frame.nwk_header.port.app_port = NWK_PORT_PING;
+    ((simpliciti_ping_payload_t *)frame.payload)->request = app_info;
+    return frame;
+}
+
+// ===========================================================================
+// SimpliciTI — Ping
+// ===========================================================================
+
+// Initiator sends a ping request via the send_ping API
+TEST(SimplictiPing, SendRequest)
+{
+    simpliciti_context_t ctx = make_test_context(0xAABBCCDD);
+
+    ASSERT_EQ(simpliciti_send_ping(&ctx, 0x11223344), SIMPLICITI_SUCCESS);
+    ASSERT_GT(g_sent_len, (size_t)0);
+
+    EXPECT_EQ(g_sent_buf[PING_WIRE_PORT_OFFSET],     0x01u);
+    EXPECT_EQ(g_sent_buf[PING_WIRE_APP_INFO_OFFSET], NWK_PORT_PING_REQUEST);
+}
+
+// Responder sends a ping reply; app_info MSB must be set, payload TID echoed
+TEST(SimplictiPing, SendReply)
+{
+    simpliciti_context_t ctx = make_test_context(0x11223344);
+    simpliciti_frame_t frame = make_ping_frame(0xAABBCCDD, ctx.device_address,
+                                               NWK_PORT_PING_RESPONSE);
+
+    ASSERT_EQ(simpliciti_send_msg(&ctx, &frame, true, false), SIMPLICITI_SUCCESS);
+    ASSERT_GT(g_sent_len, (size_t)0);
+
+    EXPECT_EQ(g_sent_buf[PING_WIRE_PORT_OFFSET],     0x01u);
+    EXPECT_EQ(g_sent_buf[PING_WIRE_APP_INFO_OFFSET], NWK_PORT_PING_RESPONSE) << "MSB set = reply";
+}
+
+// Request and reply are distinguishable by app_info byte alone; port byte is the same
+TEST(SimplictiPing, RequestAndReplyDifferentiated)
+{
+    simpliciti_context_t ctx = make_test_context(0xAABBCCDD);
+
+    ASSERT_EQ(simpliciti_send_ping(&ctx, 0x11223344), SIMPLICITI_SUCCESS);
+    uint8_t req_port     = g_sent_buf[PING_WIRE_PORT_OFFSET];
+    uint8_t req_app_info = g_sent_buf[PING_WIRE_APP_INFO_OFFSET];
+
+    simpliciti_frame_t rep = make_ping_frame(0x11223344, ctx.device_address, NWK_PORT_PING_RESPONSE);
+    ASSERT_EQ(simpliciti_send_msg(&ctx, &rep, true, false), SIMPLICITI_SUCCESS);
+    uint8_t rep_port     = g_sent_buf[PING_WIRE_PORT_OFFSET];
+    uint8_t rep_app_info = g_sent_buf[PING_WIRE_APP_INFO_OFFSET];
+
+    EXPECT_EQ(req_port, rep_port)          << "same NWK port byte";
+    EXPECT_EQ(req_app_info & 0x80u, 0x00u) << "request: MSB clear";
+    EXPECT_EQ(rep_app_info & 0x80u, 0x80u) << "reply: MSB set";
+}
+
+// Receiving a ping request triggers an auto-reply via handle_ping
+TEST(SimplictiPing, ReceiveRequestTriggersReply)
+{
+    const uint32_t my_addr   = 0xAABBCCDD;
+    const uint32_t peer_addr = 0x11223344;
+    simpliciti_context_t ctx = make_test_context(my_addr);
+
+    uint8_t ping_payload[] = {NWK_PORT_PING_REQUEST};
+    uint8_t wire[SIMPLICITI_MAX_FRAME_SIZE];
+    size_t len = build_simpliciti_frame(my_addr, peer_addr, 0x01, 0x00, 0x01,
+                                        ping_payload, sizeof(ping_payload), wire);
+
+    ASSERT_EQ(simpliciti_receive_msg(&ctx, wire, len), SIMPLICITI_SUCCESS);
+
+    EXPECT_EQ(g_send_count, 1) << "one reply sent by handle_ping";
+    EXPECT_EQ(g_sent_buf[PING_WIRE_APP_INFO_OFFSET], NWK_PORT_PING_RESPONSE);
+    uint32_t reply_dst;
+    memcpy(&reply_dst, g_sent_buf + 1, 4);
+    EXPECT_EQ(reply_dst, peer_addr) << "reply addressed back to original sender";
+}
+
+// Receiving a ping response does not trigger a further send
+TEST(SimplictiPing, ReceiveResponseNoExtraSend)
+{
+    const uint32_t my_addr = 0xAABBCCDD;
+    simpliciti_context_t ctx = make_test_context(my_addr);
+
+    uint8_t ping_payload[] = {NWK_PORT_PING_RESPONSE};
+    uint8_t wire[SIMPLICITI_MAX_FRAME_SIZE];
+    size_t len = build_simpliciti_frame(my_addr, 0x11223344, 0x01, 0x00, 0x01,
+                                        ping_payload, sizeof(ping_payload), wire);
+
+    ASSERT_EQ(simpliciti_receive_msg(&ctx, wire, len), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_send_count, 0) << "no extra send on response";
+}
+
+// ===========================================================================
+// SimpliciTI — TID Management
+// ===========================================================================
+
+// After init, last_tid=0; first send_ping assigns tractid=1
+TEST(TidManagement, AutoAssignedOnFirstSend)
+{
+    simpliciti_context_t ctx = make_test_context(0xAABBCCDD);
+
+    ASSERT_EQ(simpliciti_send_ping(&ctx, 0x11223344), SIMPLICITI_SUCCESS);
+
+    EXPECT_EQ(ctx.last_tid, 1u) << "tractid = last_tid+1 = 1";
+    EXPECT_EQ(g_sent_buf[PING_WIRE_TRACTID_OFFSET], 1u);
+}
+
+// Each successive send increments the TID by one
+TEST(TidManagement, IncrementsBetweenSends)
+{
+    simpliciti_context_t ctx = make_test_context(0xAABBCCDD);
+
+    ASSERT_EQ(simpliciti_send_ping(&ctx, 0x11223344), SIMPLICITI_SUCCESS);
+    uint8_t tid1 = g_sent_buf[PING_WIRE_TRACTID_OFFSET];
+    ASSERT_EQ(simpliciti_send_ping(&ctx, 0x11223344), SIMPLICITI_SUCCESS);
+    uint8_t tid2 = g_sent_buf[PING_WIRE_TRACTID_OFFSET];
+
+    EXPECT_EQ(tid2, tid1 + 1u);
+    EXPECT_EQ(ctx.last_tid, tid2);
+}
+
+// tractid in the wire matches ctx.last_tid after send_ping
+TEST(TidManagement, FrameTractidMatchesWire)
+{
+    simpliciti_context_t ctx = make_test_context(0xAABBCCDD);
+
+    ASSERT_EQ(simpliciti_send_ping(&ctx, 0x11223344), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_sent_buf[PING_WIRE_TRACTID_OFFSET], ctx.last_tid);
+}
+
+// ===========================================================================
+// SimpliciTI — Pending Messages
+// ===========================================================================
+
+// send_ping sets ack_req=1 implicitly; check_outgoing retransmits after timeout
+TEST(PendingMsg, StoredAndRetransmittedOnTimeout)
+{
+    simpliciti_context_t ctx = make_test_context(0xAABBCCDD);
+
+    ASSERT_EQ(simpliciti_send_ping(&ctx, 0x11223344), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_send_count, 1);
+
+    g_mock_time = SIMPLICITI_ACK_TIMEOUT_MS + 1;
+    ASSERT_EQ(simpliciti_check_outgoing_messages(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_send_count, 2) << "retransmitted once after timeout";
+}
+
+// Message sent with ack_req=0 is not stored; no retransmit occurs
+TEST(PendingMsg, NotStoredWithoutAckReq)
+{
+    simpliciti_context_t ctx = make_test_context(0xAABBCCDD);
+    simpliciti_frame_t frame = make_ping_frame(0x11223344, ctx.device_address,
+                                               NWK_PORT_PING_REQUEST);
+    frame.nwk_header.device_info.ack_req = false;
+
+    ASSERT_EQ(simpliciti_send_msg(&ctx, &frame, false, false), SIMPLICITI_SUCCESS);
+
+    g_mock_time = SIMPLICITI_ACK_TIMEOUT_MS + 1;
+    ASSERT_EQ(simpliciti_check_outgoing_messages(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_send_count, 1) << "no retransmit when ack_req=0";
+}
+
+// Receiving a reply with ack_reply=1 clears the pending message; no further retransmit
+TEST(PendingMsg, ClearedOnAckReply)
+{
+    const uint32_t my_addr   = 0xAABBCCDD;
+    const uint32_t peer_addr = 0x11223344;
+    simpliciti_context_t ctx = make_test_context(my_addr);
+
+    ASSERT_EQ(simpliciti_send_ping(&ctx, peer_addr), SIMPLICITI_SUCCESS);
+    uint8_t assigned_tid = g_sent_buf[PING_WIRE_TRACTID_OFFSET];
+
+    // Receive a reply with ack_reply=1 and the matching tractid
+    uint8_t reply_payload[] = {NWK_PORT_PING_RESPONSE};
+    uint8_t wire[SIMPLICITI_MAX_FRAME_SIZE];
+    size_t len = build_simpliciti_frame(my_addr, peer_addr,
+                                        0x01, DI_ACK_REPLY_WIRE, assigned_tid,
+                                        reply_payload, sizeof(reply_payload), wire);
+    ASSERT_EQ(simpliciti_receive_msg(&ctx, wire, len), SIMPLICITI_SUCCESS);
+
+    // Advance past timeout — no retransmit since pending msg was cleared
+    g_mock_time = SIMPLICITI_ACK_TIMEOUT_MS + 1;
+    int count_before = g_send_count;
+    ASSERT_EQ(simpliciti_check_outgoing_messages(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_send_count, count_before) << "cleared; no retransmit";
+}
+
+// Without get_time_ms, is_timeout_set=false; check_outgoing never retransmits
+TEST(PendingMsg, NoTimeoutWithoutTimeCallback)
+{
+    simpliciti_context_t ctx = make_test_context(0xAABBCCDD);
+    ctx.callbacks.get_time_ms = nullptr;
+
+    ASSERT_EQ(simpliciti_send_ping(&ctx, 0x11223344), SIMPLICITI_SUCCESS);
+
+    g_mock_time = SIMPLICITI_ACK_TIMEOUT_MS + 1;
+    ASSERT_EQ(simpliciti_check_outgoing_messages(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_send_count, 1) << "no retransmit without time callback";
+}
+
+// ===========================================================================
+// SimpliciTI — Timeout and Retry
+// ===========================================================================
+
+// Each timeout triggers one retransmit with a rescheduled window
+TEST(Retry, RetransmitsOnEachTimeout)
+{
+    simpliciti_context_t ctx = make_test_context(0xAABBCCDD);
+    ASSERT_EQ(simpliciti_send_ping(&ctx, 0x11223344), SIMPLICITI_SUCCESS);
+
+    g_mock_time = SIMPLICITI_ACK_TIMEOUT_MS + 1;
+    ASSERT_EQ(simpliciti_check_outgoing_messages(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_send_count, 2) << "first retransmit";
+
+    g_mock_time += SIMPLICITI_ACK_TIMEOUT_MS;
+    ASSERT_EQ(simpliciti_check_outgoing_messages(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_send_count, 3) << "second retransmit";
+}
+
+// Total sends = 1 original + SIMPLICITI_MAX_RETRIES retransmissions
+TEST(Retry, TotalSendCountMatchesMaxRetries)
+{
+    simpliciti_context_t ctx = make_test_context(0xAABBCCDD);
+    ASSERT_EQ(simpliciti_send_ping(&ctx, 0x11223344), SIMPLICITI_SUCCESS);
+
+    for (int i = 0; i < SIMPLICITI_MAX_RETRIES; i++)
+    {
+        g_mock_time += SIMPLICITI_ACK_TIMEOUT_MS + 1;
+        ASSERT_EQ(simpliciti_check_outgoing_messages(&ctx), SIMPLICITI_SUCCESS);
+    }
+
+    EXPECT_EQ(g_send_count, 1 + SIMPLICITI_MAX_RETRIES)
+        << "1 original + " << SIMPLICITI_MAX_RETRIES << " retransmits";
+}
+
+// After max retries are exhausted, the message is dropped — no further sends
+TEST(Retry, StopsAfterMaxRetries)
+{
+    simpliciti_context_t ctx = make_test_context(0xAABBCCDD);
+    ASSERT_EQ(simpliciti_send_ping(&ctx, 0x11223344), SIMPLICITI_SUCCESS);
+
+    for (int i = 0; i < SIMPLICITI_MAX_RETRIES; i++)
+    {
+        g_mock_time += SIMPLICITI_ACK_TIMEOUT_MS + 1;
+        ASSERT_EQ(simpliciti_check_outgoing_messages(&ctx), SIMPLICITI_SUCCESS);
+    }
+    int count_at_exhaustion = g_send_count;
+
+    // One additional timeout — must be silent
+    g_mock_time += SIMPLICITI_ACK_TIMEOUT_MS + 1;
+    ASSERT_EQ(simpliciti_check_outgoing_messages(&ctx), SIMPLICITI_SUCCESS);
+    EXPECT_EQ(g_send_count, count_at_exhaustion) << "dropped after max retries";
+}
+    

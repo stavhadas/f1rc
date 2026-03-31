@@ -9,4 +9,8 @@ typedef enum
     SIMPLICITI_ERROR_ENCODING,
 } simpliciti_status_t;
 
+#define SIMPLICITI_MAX_RESERVED_PORT (0x1F)
+#define SIMPLICITI_MAX_APP_PORT (0x3E)
+#define SIMPLICITI_BROADCAST_PORT (0x3F)
+#define SIMPLICITI_MAX_TID (0xFF)
 #endif // SIMPLICITI_COMMON_H

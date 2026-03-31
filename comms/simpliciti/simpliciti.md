@@ -64,8 +64,20 @@ Encapsulated within the MRFI payload, the NWK header precedes all application da
 ## 4. Connection Management & State Machines (Management Ports)
 
 ### 4.1 Port 0x01: Ping (Presence Detection)
-* **Initiator State:** Sends Unicast Ping Request (`0x01` | `TRACTID`). Enters `WAIT_FOR_REPLY` with timeout.
-* **Responder State:** Intercepts on Port `0x01`. Echoes payload back as Unicast Ping Reply (`0x81` | `TRACTID`).
+Ping is unicast and blocking on the initiator side — the initiator waits for a reply with a timeout applied.
+
+**NWK Header:** Port byte is `0x01` for both request and reply (`forwarded=0`, `encrypted=0`, `app_port=1`). The `DEVICE_INFO` byte carries standard sender/rx-type fields and is not used to distinguish request from reply.
+
+**Payload Structure:**
+
+| Byte | Field | Request | Reply |
+|---|---|---|---|
+| 0 | App Info | `0x01` | `0x80` (MSB set = reply) |
+
+* The **App Info MSB** (`0x80`) is the sole indicator that a frame is a ping reply. The initiator uses this to distinguish a reply from a new incoming request on the same port.
+* The **NWK header `TRACTID`** is the sole transaction identifier — there is no duplicate TID in the payload.
+* **Initiator:** Sends request with `app_info=0x01`. Enters `WAIT_FOR_REPLY` with timeout.
+* **Responder:** On receipt, sends unicast reply with `app_info=0x80`. The NWK header `TRACTID` is echoed per standard TRACTID discipline (section 3.2).
 
 ### 4.2 Port 0x02: Link Establishment
 Requires a bi-directional handshake to populate the local Connection Table.
