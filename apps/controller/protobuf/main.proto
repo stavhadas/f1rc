@@ -6,13 +6,13 @@ package f1rc;
 message GetVersionCommand {
 
 }
-enum CommandID {
-    COMMAND_ID_GET_VERSION = 0;
+message EchoCommand {
+    uint32 echoed_number = 1;
 }
 message Command {
-    CommandID id = 1;
     oneof command {
-        GetVersionCommand get_version = 2;
+        GetVersionCommand get_version = 1;
+        EchoCommand echo = 2;
     }
 }
 
