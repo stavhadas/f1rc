@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package f1rc;
+
+// Commands
+message GetVersionCommand {
+
+}
+enum CommandID {
+    COMMAND_ID_GET_VERSION = 0;
+}
+message Command {
+    CommandID id = 1;
+    oneof command {
+        GetVersionCommand get_version = 2;
+    }
+}
+
+// Responses
+enum ResponseID {
+    RESPONSE_ID_GET_VERSION = 0;
+}
+
+message GetVersionResponse {
+    uint32 major = 1;
+    uint32 minor = 2;
+    uint32 patch = 3;
+}
+
+message Response {
+    ResponseID id = 1;
+    oneof response {
+        GetVersionResponse get_version = 2;
+    }
+}
