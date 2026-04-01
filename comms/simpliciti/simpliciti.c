@@ -13,7 +13,7 @@ simpliciti_status_t simpliciti_init(simpliciti_context_t *context)
     return SIMPLICITI_SUCCESS;
 }
 
-size_t simplicity_get_payload_length(const simpliciti_frame_t *frame)
+size_t simpliciti_get_payload_length(const simpliciti_frame_t *frame)
 {
     return frame->mfri_header.length - NWK_HEADER_SIZE;
 }
@@ -45,7 +45,7 @@ simpliciti_status_t simpliciti_decode_frame(const uint8_t *data,
     memcpy(&frame->nwk_header, &nwk_frame.header, sizeof(nwk_header_t));
 
     // Populate simpliciti frame
-    memcpy(frame->payload, nwk_frame.payload, simplicity_get_payload_length(frame));
+    memcpy(frame->payload, nwk_frame.payload, simpliciti_get_payload_length(frame));
     return SIMPLICITI_SUCCESS;
 }
 
@@ -58,7 +58,7 @@ simpliciti_status_t simpliciti_encode_frame(const simpliciti_frame_t *frame,
     nwk_frame_t nwk_frame = {
         .header = frame->nwk_header,
         .payload = (uint8_t *)frame->payload,
-        .payload_length = simplicity_get_payload_length(frame)};
+        .payload_length = simpliciti_get_payload_length(frame)};
     size_t nwk_length = sizeof(nwk_buffer);
     simpliciti_status_t status = nwk_encode_frame(&nwk_frame, nwk_buffer, &nwk_length);
     if (status != SIMPLICITI_SUCCESS)
@@ -71,7 +71,7 @@ simpliciti_status_t simpliciti_encode_frame(const simpliciti_frame_t *frame,
     mfri_frame_t mfri_frame = {
         .header = frame->mfri_header,
         .payload = nwk_buffer,
-        .payload_length = simplicity_get_payload_length(frame) + NWK_HEADER_SIZE};
+        .payload_length = simpliciti_get_payload_length(frame) + NWK_HEADER_SIZE};
 
     status = mfri_encode_frame(&mfri_frame, buffer, length);
     if (status != SIMPLICITI_SUCCESS)
@@ -225,9 +225,9 @@ simpliciti_status_t simpliciti_check_outgoing_messages(simpliciti_context_t *con
 
 static simpliciti_status_t simpliciti_handle_ping(simpliciti_context_t *context, const simpliciti_frame_t *frame)
 {
-    if (simplicity_get_payload_length(frame) < sizeof(simpliciti_ping_payload_t))
+    if (simpliciti_get_payload_length(frame) < sizeof(simpliciti_ping_payload_t))
     {
-        TRACE("Ping payload too short: %zu bytes\n", simplicity_get_payload_length(frame));
+        TRACE("Ping payload too short: %zu bytes\n", simpliciti_get_payload_length(frame));
         return SIMPLICITI_ERROR_DECODING;
     }
     simpliciti_ping_payload_t *ping_payload = (simpliciti_ping_payload_t *)frame->payload;

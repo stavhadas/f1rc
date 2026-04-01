@@ -88,6 +88,8 @@ typedef struct
 
 simpliciti_status_t simpliciti_init(simpliciti_context_t *context);
 
+size_t simpliciti_get_payload_length(const simpliciti_frame_t *frame);
+
 simpliciti_status_t simpliciti_check_outgoing_messages(simpliciti_context_t *context);
 
 simpliciti_status_t simpliciti_send_msg(simpliciti_context_t *context, simpliciti_frame_t *frame, bool is_response, bool is_retransmission);
