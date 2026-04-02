@@ -17,9 +17,6 @@ message Command {
 }
 
 // Responses
-enum ResponseID {
-    RESPONSE_ID_GET_VERSION = 0;
-}
 
 message GetVersionResponse {
     uint32 major = 1;
@@ -28,7 +25,6 @@ message GetVersionResponse {
 }
 
 message Response {
-    ResponseID id = 1;
     oneof response {
         GetVersionResponse get_version = 2;
     }
