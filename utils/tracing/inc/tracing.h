@@ -1,7 +1,7 @@
 #ifndef TRACING_H
 #define TRACING_H
 
-#define TRACING_ENABLED 1
+#define TRACING_ENABLED 0
 #if TRACING_ENABLED
 #include <stdio.h>
 #define TRACE(fmt, ...) do { \

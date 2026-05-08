@@ -1,7 +1,9 @@
 #include "car.h"
 
+car_context_t car_context;
+
 int main()
 {
-    car_start();
-    return 0;
+  car_init(&car_context);
+  car_start(&car_context);
 }
