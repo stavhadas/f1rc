@@ -1,0 +1,94 @@
+# LLMS.txt — f1rc Architecture Map (starter)
+
+Purpose: hardware/firmware facts an AI assistant can't safely infer from source
+alone. Read this before generating driver, ISR, or memory-handling code
+(see CLAUDE.md section 3). Extend this file whenever a new peripheral, board,
+or target is added — do not let it go stale.
+
+Status: STARTER DOC, drafted 2026-07-27 from apps/car/car-bsp source
+(no CubeMX .ioc is checked into the repo — it was removed; this file is now
+the source of truth for pin/clock/DMA facts until/unless one is reintroduced).
+Currently only covers the `car` app / STM32F411 target.
+
+## Target: `car` app
+
+- MCU: STM32F411CEU6 (LQFP48), Arm Cortex-M4F
+- Flash: 512 KB @ 0x08000000
+- SRAM: 128 KB @ 0x20000000
+- HAL package: STM32F4xx_HAL_Driver, vendored under bsp/Drivers/STM32F4xx_HAL_Driver
+  (confirmed present: HAL_UARTEx_ReceiveToIdle_DMA / HAL_UARTEx_RxEventCallback,
+  i.e. this HAL version supports IDLE-line DMA reception — no need to hand-roll it)
+
+### Clock configuration (apps/car/car-bsp/car_bsp.c: car_bsp_system_clock_config)
+
+- Source: HSI (internal 16 MHz RC), PLL bypassed (RCC_PLL_NONE)
+- SYSCLK = HCLK = PCLK1 = PCLK2 = 16 MHz (all dividers = DIV1)
+- FLASH_LATENCY_0
+- NOTE: this is a conservative/development clock config, not the part's rated
+  max (100 MHz via PLL). Any timing-sensitive calculation (baud rate, DMA
+  throughput, systick) must assume 16 MHz unless this config changes.
+
+### RTOS
+
+- FreeRTOS via CMSIS-OS2 API (osKernelInitialize/osKernelStart in car_bsp.c)
+- PendSV priority is fixed at 15 (lowest) — required by FreeRTOS, do not change
+  (apps/car/car-bsp/stm32f4xx_hal_msp.c: HAL_MspInit)
+- apps/car/car-bsp/inc/FreeRTOSConfig.h:
+  - configPRIO_BITS = 4 (16 priority levels, 0=highest .. 15=lowest)
+  - configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY = 5
+  - **ISR-safety rule**: any interrupt handler that calls a FreeRTOS
+    `...FromISR` API (queues, semaphores, task notifications) MUST be
+    configured at NVIC preemption priority >= 5 (i.e. numerically 5-15).
+    Priorities 0-4 are "above the kernel" and must never call FreeRTOS APIs.
+  - Existing precedent: DMA2_Stream2_IRQn is set to priority 5 in
+    uart_interface_init() — treat 5 as the standard priority for any new
+    UART/DMA IRQ that needs to touch FreeRTOS primitives from ISR context.
+
+### Peripheral / pin map
+
+| Peripheral | Pins | AF | Notes |
+|---|---|---|---|
+| USART1 | PA9 = TX, PA10 = RX | AF7 | apps/car/car-bsp/stm32f4xx_hal_msp.c: HAL_UART_MspInit |
+
+USART1 config (apps/car/car-bsp/car_bsp.c: car_bsp_init):
+- Baud 115200, 8 data bits, 1 stop bit, no parity, no HW flow control,
+  16x oversampling, mode TX+RX
+- Wired up as `context->cmd_uart` via `uart_interface_init(...)` — this is the
+  "command" UART, used for host/PC <-> car communication (see comms/hldc,
+  comms/simpliciti for the protocol layers running over it)
+
+### DMA stream/channel assignments (STM32F411 DMA request mapping)
+
+| Request | Controller | Stream | Channel | Status |
+|---|---|---|---|---|
+| USART1_RX | DMA2 | Stream2 | 4 | **in use** (apps/car/car-bsp/car_bsp.c) |
+| USART1_RX (alt) | DMA2 | Stream5 | 4 | available if Stream2 is needed elsewhere |
+| USART1_TX | DMA2 | Stream7 | 4 | not currently used — TX is blocking/polling (HAL_UART_Transmit) |
+
+USART1 is on APB2 → its DMA requests only route through **DMA2** (DMA1 serves
+APB1 peripherals: USART2/3, UART4/5, SPI2/3, I2C1/2/3, TIM2-7). Don't assign a
+DMA1 stream to a USART1 request — it doesn't exist in the request mapping.
+
+### Repo driver convention
+
+- Peripherals are wrapped in a `xxx_interface_t` struct bundling the raw HAL
+  handle(s) + a function-pointer callback, e.g.
+  `comms/interfaces/uart_interface/{inc/uart_interface.h,uart_interface.c}`:
+  `uart_interface_t { UART_HandleTypeDef huart; DMA_HandleTypeDef hdma_rx;
+  on_uart_if_recv_t on_recv; }`
+- `xxx_interface_init()` takes raw HAL config enums as parameters rather than
+  hiding them behind another abstraction — callers pass HAL constants directly
+  (e.g. `UART_WORDLENGTH_8B`).
+- No malloc/free anywhere near ISR-adjacent code (CLAUDE.md hard rule) —
+  buffers used by DMA/ISR must be static, either file-scope `static` or fields
+  on the `xxx_interface_t` struct itself.
+
+### Known gaps / TODO for this file
+
+- No CubeMX .ioc in-repo; if one is reintroduced, prefer it as source of truth
+  and reduce this section to a diff/summary.
+- Only the `car` app / STM32F411 target is documented. `comms/simpliciti` and
+  other apps/targets are not yet covered here.
+- Error handling for HAL_UART_Init/HAL_DMA_Init failures is currently a bare
+  `while(1) {}` spin (uart_interface.c) — not a fault registers/CFSR mechanism,
+  just noted here so it isn't mistaken for intentional recovery logic.
