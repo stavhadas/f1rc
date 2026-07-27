@@ -228,14 +228,17 @@ hldc_status_t hldc_handle_byte(hldc_context_t *ctx, uint8_t byte)
         ctx->state = HLDC_STATE_PAYLOAD;
         break;
     case HLDC_STATE_PAYLOAD:
+    {
         hldc_status_t status = hldc_handle_payload(ctx, byte);
         if (status != HLDC_STATUS_OK)
         {
-            call_on_error(ctx, status); // Call error callback on payload handling error
-            return status;              // Payload handling error (e.g., overflow or CRC error)
+            call_on_error(ctx, status);
+            return status;
         }
         break;
+    }
     case HLDC_STATE_ESCAPED_CHAR:
+    {
         uint8_t escaped_char = byte ^ HLDC_ESCAPE_XOR;
 
         if (ctx->current_frame.payload_length < MAX_PAYLOAD_SIZE)
@@ -245,12 +248,13 @@ hldc_status_t hldc_handle_byte(hldc_context_t *ctx, uint8_t byte)
         }
         else
         {
-            hldc_restart_buffer(ctx, false);              // Reset context on overflow
-            call_on_error(ctx, HLDC_STATUS_DECODE_ERROR); // Call error callback on overflow
+            hldc_restart_buffer(ctx, false);
+            call_on_error(ctx, HLDC_STATUS_DECODE_ERROR);
             return HLDC_STATUS_DECODE_ERROR;
         }
-        ctx->state = HLDC_STATE_PAYLOAD; // Return to payload state after handling escaped
+        ctx->state = HLDC_STATE_PAYLOAD;
         break;
+    }
     default:
         break;
     }
@@ -259,7 +263,6 @@ hldc_status_t hldc_handle_byte(hldc_context_t *ctx, uint8_t byte)
 
 hldc_status_t hldc_push_bytes(hldc_context_t *ctx, const uint8_t *data, size_t length)
 {
-    hldc_status_t status = HLDC_STATUS_OK;
     if (!ctx || !data || length == 0)
     {
         TRACE("Invalid input parameters: ctx=%p, data=%p, length=%zu", (void *)ctx, (void *)data, length);

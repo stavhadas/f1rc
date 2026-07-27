@@ -1,0 +1,1 @@
+include(${CMAKE_CURRENT_LIST_DIR}/uart_interface/uart_interface.cmake)

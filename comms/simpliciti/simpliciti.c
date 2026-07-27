@@ -225,63 +225,63 @@ simpliciti_status_t simpliciti_check_outgoing_messages(simpliciti_context_t *con
 
 static simpliciti_status_t simpliciti_handle_ping(simpliciti_context_t *context, const simpliciti_frame_t *frame)
 {
-    if (simpliciti_get_payload_length(frame) < sizeof(simpliciti_ping_payload_t))
-    {
-        TRACE("Ping payload too short: %zu bytes\n", simpliciti_get_payload_length(frame));
-        return SIMPLICITI_ERROR_DECODING;
-    }
-    simpliciti_ping_payload_t *ping_payload = (simpliciti_ping_payload_t *)frame->payload;
-    switch (ping_payload->request)
-    {
-    case NWK_PORT_PING_REQUEST:
-        simpliciti_frame_t response = {0};
-        TRACE("Received ping message from 0x%08X with TID %u\n", frame->mfri_header.srcaddr, frame->nwk_header.tractid);
+    // simpliciti_frame_t response = {0};
+    // if (simpliciti_get_payload_length(frame) < sizeof(simpliciti_ping_payload_t))
+    // {
+    //     TRACE("Ping payload too short: %zu bytes\n", simpliciti_get_payload_length(frame));
+    //     return SIMPLICITI_ERROR_DECODING;
+    // }
+    // simpliciti_ping_payload_t *ping_payload = (simpliciti_ping_payload_t *)frame->payload;
+    // switch (ping_payload->request)
+    // {
+    // case NWK_PORT_PING_REQUEST:
+    //     TRACE("Received ping message from 0x%08X with TID %u\n", frame->mfri_header.srcaddr, frame->nwk_header.tractid);
 
-        // Copy request frame to response, then modify fields for reply
-        memcpy(&response, frame, sizeof(simpliciti_frame_t));
+    //     // Copy request frame to response, then modify fields for reply
+    //     memcpy(&response, frame, sizeof(simpliciti_frame_t));
 
-        // Swap addresses
-        uint32_t me = context->device_address;
-        response.mfri_header.dstaddr = frame->mfri_header.srcaddr;
-        response.mfri_header.srcaddr = me;
+    //     // Swap addresses
+    //     uint32_t me = context->device_address;
+    //     response.mfri_header.dstaddr = frame->mfri_header.srcaddr;
+    //     response.mfri_header.srcaddr = me;
 
-        // Set response payload
-        simpliciti_ping_payload_t response_payload = {
-            .request = NWK_PORT_PING_RESPONSE};
-        memcpy(response.payload, &response_payload, sizeof(simpliciti_ping_payload_t));
+    //     // Set response payload
+    //     simpliciti_ping_payload_t response_payload = {
+    //         .request = NWK_PORT_PING_RESPONSE};
+    //     memcpy(response.payload, &response_payload, sizeof(simpliciti_ping_payload_t));
 
-        // Send response
-        return simpliciti_send_msg(context, &response, true, false);
-        break;
-    case NWK_PORT_PING_RESPONSE:
-        if (g_pending_msgs[frame->nwk_header.tractid].in_use)
-        {
-            TRACE("Received ping response from 0x%08X with TID %u\n", frame->mfri_header.srcaddr, frame->nwk_header.tractid);
-            uint32_t now = 0;
-            if (context->callbacks.get_time_ms && context->callbacks.get_time_ms(&now) == SIMPLICITI_SUCCESS)
-            {
-                context->link_info.last_ping_timestamp = now;
-                if (context->callbacks.successful_ping != NULL)
-                {
-                    context->callbacks.successful_ping();
-                }
-            }
-            else
-            {
-                TRACE("get_time_ms callback failed, cannot calculate ping RTT\n");
-            }
-        }
-        else
-        {
-            TRACE("Received unexpected ping response from 0x%08X with TID %u\n", frame->mfri_header.srcaddr, frame->nwk_header.tractid);
-        }
-        // TODO: Implement handling of received ping response, e.g. notify application layer or update state
-        break;
-    default:
-        TRACE("Unknown ping request type: %u\n", ping_payload->request);
-        return SIMPLICITI_ERROR_INVALID_PARAM;
-        break;
-    }
+    //     // Send response
+    //     return simpliciti_send_msg(context, &response, true, false);
+    //     break;
+    // case NWK_PORT_PING_RESPONSE:
+    //     if (g_pending_msgs[frame->nwk_header.tractid].in_use)
+    //     {
+    //         TRACE("Received ping response from 0x%08X with TID %u\n", frame->mfri_header.srcaddr, frame->nwk_header.tractid);
+    //         uint32_t now = 0;
+    //         if (context->callbacks.get_time_ms && context->callbacks.get_time_ms(&now) == SIMPLICITI_SUCCESS)
+    //         {
+    //             context->link_info.last_ping_timestamp = now;
+    //             if (context->callbacks.successful_ping != NULL)
+    //             {
+    //                 context->callbacks.successful_ping();
+    //             }
+    //         }
+    //         else
+    //         {
+    //             TRACE("get_time_ms callback failed, cannot calculate ping RTT\n");
+    //         }
+    //     }
+    //     else
+    //     {
+    //         TRACE("Received unexpected ping response from 0x%08X with TID %u\n", frame->mfri_header.srcaddr, frame->nwk_header.tractid);
+    //     }
+    //     // TODO: Implement handling of received ping response, e.g. notify application layer or update state
+    //     break;
+    // default:
+    //     TRACE("Unknown ping request type: %u\n", ping_payload->request);
+    //     return SIMPLICITI_ERROR_INVALID_PARAM;
+    //     break;
+    // }
     return SIMPLICITI_SUCCESS;
 }
 
@@ -312,7 +312,7 @@ static simpliciti_status_t simpliciti_handle_link(simpliciti_context_t *context,
         if (context->link_info.link_state == SIMPLICITI_LINK_STATE_WAITING_FOR_LINK)
         {
             TRACE("Received link request from 0x%08X while waiting for link\n", frame->mfri_header.srcaddr);
-            
+
             // Reply with ACK
             simpliciti_frame_t response = {0};
             response.mfri_header.dstaddr = frame->mfri_header.srcaddr;
@@ -327,7 +327,7 @@ static simpliciti_status_t simpliciti_handle_link(simpliciti_context_t *context,
                 TRACE("Failed to send ACK for link request: %d\n", status);
                 return status;
             }
-            
+
             // Update link state to connected
             TRACE("Established link with 0x%08X\n", frame->mfri_header.srcaddr);
             context->link_info.link_state = SIMPLICITI_LINK_STATE_CONNECTED;
@@ -433,7 +433,7 @@ simpliciti_status_t simpliciti_receive_msg(simpliciti_context_t *context, const 
         if (g_pending_msgs[frame.nwk_header.tractid].in_use)
         {
             TRACE("Received ACK for TID %u, clearing pending message\n", frame.nwk_header.tractid);
-        g_pending_msgs[frame.nwk_header.tractid].in_use = false;
+            g_pending_msgs[frame.nwk_header.tractid].in_use = false;
         }
     }
     return SIMPLICITI_SUCCESS;
@@ -523,7 +523,7 @@ simpliciti_status_t simpliciti_disconnect(simpliciti_context_t *context)
         TRACE("Not connected, no action taken\n");
         return SIMPLICITI_SUCCESS;
     }
-    
+
     simpliciti_frame_t frame = {};
     frame.mfri_header.dstaddr = context->link_info.dest_address;
     frame.mfri_header.srcaddr = context->device_address;
@@ -547,5 +547,4 @@ simpliciti_status_t simpliciti_disconnect(simpliciti_context_t *context)
     }
 
     return SIMPLICITI_SUCCESS;
-
 }
