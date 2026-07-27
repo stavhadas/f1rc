@@ -3,12 +3,12 @@
 #include "stm32f4xx_hal.h"
 #include "stm32f4xx_hal_flash_ex.h"
 #include "stm32f4xx_hal_rcc.h"
-#include "car.h"
+#include "controller.h"
 #include "cmsis_os2.h"
 #include "FreeRTOS.h"
 #include "task.h"
 
-static bool car_bsp_system_clock_config(void)
+static bool controller_bsp_system_clock_config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
@@ -38,36 +38,28 @@ static bool car_bsp_system_clock_config(void)
   return true;
 }
 
-// void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-// {
-//   if (htim->Instance == TIM1)
-//   {
-//     HAL_IncTick();
-//   }
-// }
-
-static bool car_bsp_rtos_init(void)
+static bool controller_bsp_rtos_init(void)
 {
   osKernelInitialize();
   return true;
 }
 
-bool car_bsp_init(car_context_t *context)
+bool controller_bsp_init(controller_context_t *context)
 {
   HAL_Init();
-  if (!car_bsp_system_clock_config())
+  if (!controller_bsp_system_clock_config())
   {
     return false;
   }
 
-  car_bsp_rtos_init();
+  controller_bsp_rtos_init();
 
   uart_interface_init(&context->cmd_uart, USART1, 115200, UART_WORDLENGTH_8B, UART_STOPBITS_1, UART_PARITY_NONE, UART_MODE_TX_RX, UART_HWCONTROL_NONE, UART_OVERSAMPLING_16, DMA2_Stream2, DMA_CHANNEL_4, DMA2_Stream2_IRQn, USART1_IRQn);
 
   return true;
 }
 
-bool car_bsp_start(void)
+bool controller_bsp_start(void)
 {
   osKernelStart();
   return true;

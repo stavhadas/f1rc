@@ -76,11 +76,6 @@ void uart_interface_init(uart_interface_t *interface,
     // the dispatch functions know how to route it to this instance.
     uart_interface_register(interface);
 
-    // NOTE: on a parity/framing/overrun error, HAL aborts DMA reception with
-    // no auto-restart, and the default HAL_UART_ErrorCallback is a no-op --
-    // line noise can permanently stop RX. Not handled here; flagged for
-    // whoever picks this up next.
-
     HAL_NVIC_SetPriority(dma_rx_irq, 5, 0);
     HAL_NVIC_EnableIRQ(dma_rx_irq);
 
@@ -176,4 +171,14 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     // (one-past-the-end), but the DMA's NDTR register has already reloaded
     // and the next byte physically lands at index 0.
     interface->rx_old_pos = (pos == UART_INTERFACE_RX_BUFFER_SIZE) ? 0 : pos;
+}
+
+// On a parity/framing/overrun error, HAL aborts DMA reception and does not
+// restart it on its own -- without this, a single line-noise event
+// permanently stops RX for the rest of the interface's lifetime.
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    uart_interface_t *interface = uart_interface_from_huart(huart);
+    interface->rx_old_pos = 0;
+    HAL_UARTEx_ReceiveToIdle_DMA(huart, interface->rx_buffer, UART_INTERFACE_RX_BUFFER_SIZE);
 }

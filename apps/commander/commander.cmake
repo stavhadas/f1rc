@@ -1,15 +1,23 @@
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(PROTOBUF_C REQUIRED libprotobuf-c)
+# Codegen (main.proto -> main.pb-c.c/.h) needs a host tool at configure time.
+# Prefer a standalone protoc-c wrapper if present (common on Linux distros);
+# otherwise fall back to protoc + the protoc-gen-c plugin invoked directly
+# (e.g. conda envs, which ship protoc.exe and protoc-gen-c.exe separately,
+# with no protoc-c wrapper binary).
+find_program(PROTOC_C protoc-c)
+if(PROTOC_C)
+	set(_PROTOC_COMMAND ${PROTOC_C} --c_out=${GENERATED_DIR} --proto_path=${PROTO_PATH})
+else()
+	find_program(PROTOC protoc REQUIRED)
+	find_program(PROTOC_GEN_C protoc-gen-c REQUIRED)
+	set(_PROTOC_COMMAND ${PROTOC} --plugin=protoc-gen-c=${PROTOC_GEN_C} --c_out=${GENERATED_DIR} --proto_path=${PROTO_PATH})
+endif()
 
-# Find protoc-c compiler
-find_program(PROTOC_C protoc-c REQUIRED)
 set(PROTO_FILE "main.proto")
 file(MAKE_DIRECTORY ${GENERATED_DIR})
 
 message("Proto file: ${PROTO_FILE}")
 execute_process(
-	COMMAND ${PROTOC_C} --c_out=${GENERATED_DIR} --proto_path=${PROTO_PATH}
-		${PROTO_FILE}
+	COMMAND ${_PROTOC_COMMAND} ${PROTO_FILE}
 	RESULT_VARIABLE PROTOC_RESULT
 	OUTPUT_VARIABLE PROTOC_OUTPUT
 	ERROR_VARIABLE PROTOC_ERROR

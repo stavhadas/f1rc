@@ -34,3 +34,9 @@ f1rc/STM32F411XX_FLASH.ld
 build-arm/*
 f1rc/Core/Src/freertos.c
 f1rc/Core/Inc/FreeRTOSConfig.h
+*/__pycache__/*
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
