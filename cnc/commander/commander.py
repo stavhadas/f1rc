@@ -2,6 +2,7 @@
 import hashlib
 import types
 from pathlib import Path
+from queue import Empty
 import importlib.util
 from interfaces.interface import Interface, Packet
 from grpc_tools import protoc
@@ -38,9 +39,18 @@ class Commander:
             self.interface.send(packet)
             
             should_wait = kwargs.get("should_wait", False)
-            response = self.protobuf.Response().DESCRIPTOR.fields_by_name.get(cmd_name, None)
-            if should_wait and response:
+            response_field = self.protobuf.Response().DESCRIPTOR.fields_by_name.get(cmd_name, None)
+            if should_wait and response_field:
+                timeout = kwargs.get("timeout", 2.0)
                 print("Waiting for response")
+                try:
+                    data, md = self.interface._receive_queue.get(timeout=timeout)
+                except Empty:
+                    print("Timed out waiting for response")
+                    return None
+                response = self.protobuf.Response()
+                response.ParseFromString(data)
+                return response
             return 1
         return send_command
     def __init__(self, interface : Interface, proto_path : str, proto_file : str, cache_dir : str):
