@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from protocols.protocol import Protocol
-from queue import Queue
+from queue import Queue, Empty
 from threading import Thread, Event
 
 class Packet:
@@ -34,7 +34,10 @@ class Interface(ABC):
     
     def send_thread_entry(self):
         while not self._stop_event.is_set():
-            packet = self._send_queue.get()
+            try:
+                packet = self._send_queue.get(timeout=0.2)
+            except Empty:
+                continue
             if self.protocols:
                 for protocol in self.protocols:
                     try:
