@@ -10,9 +10,14 @@ add_executable(f1rc-controller
 )
 target_include_directories(f1rc-controller PRIVATE
     ${GENERATED_DIR}
-    ${PROTOBUF_C_INCLUDE_DIRS}
     ${CMAKE_CURRENT_LIST_DIR}/inc
 )
-target_link_libraries(f1rc-controller PRIVATE f1rc ${PROTOBUF_C_LIBRARIES})
+target_link_libraries(f1rc-controller PRIVATE f1rc bsp protobuf_c)
+
+add_custom_command(TARGET f1rc-controller POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:f1rc-controller> $<TARGET_FILE_DIR:f1rc-controller>/f1rc-controller.bin
+    COMMENT "Converting ELF to binary"
+)
 
 include(${CMAKE_CURRENT_LIST_DIR}/dispatcher/dispatcher.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/controller-bsp/controller_bsp.cmake)
