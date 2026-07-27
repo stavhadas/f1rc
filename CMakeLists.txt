@@ -4,7 +4,8 @@ project(f1rc C CXX ASM)
 
 add_library(f1rc "")
 
-add_subdirectory(f1rc/cmake/stm32cubemx) # ST BSP
+set(BSP_APP_CONFIG_DIR "${CMAKE_SOURCE_DIR}/apps/car/car-bsp/inc")
+add_subdirectory(bsp) # ST BSP
 
 
 # ── Sources ────────────────────────────────────────────────────────────────────

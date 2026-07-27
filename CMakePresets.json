@@ -7,7 +7,7 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-arm",
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/f1rc/cmake/gcc-arm-none-eabi.cmake",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/toolchain/gcc-arm-none-eabi.cmake",
         "CMAKE_CROSSCOMPILING": "TRUE"
       }
     },
