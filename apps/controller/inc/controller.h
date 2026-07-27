@@ -2,9 +2,16 @@
 #define CONTROLLER_H
 
 #include <stdint.h>
+#include "uart_interface.h"
 
 extern uint32_t version[];
 
-void controller_start();
+typedef struct {
+    uart_interface_t cmd_uart;
+} controller_context_t;
+
+void controller_init(controller_context_t *context);
+
+void controller_start(controller_context_t *context);
 
 #endif /* CONTROLLER_H */
