@@ -57,6 +57,7 @@ target_sources(STM32_Drivers PRIVATE
     ${_HAL_DIR}/Src/stm32f4xx_hal_pwr_ex.c
     ${_HAL_DIR}/Src/stm32f4xx_hal_rcc.c
     ${_HAL_DIR}/Src/stm32f4xx_hal_rcc_ex.c
+    ${_HAL_DIR}/Src/stm32f4xx_hal_spi.c
     ${_HAL_DIR}/Src/stm32f4xx_hal_tim.c
     ${_HAL_DIR}/Src/stm32f4xx_hal_tim_ex.c
     ${_HAL_DIR}/Src/stm32f4xx_hal_uart.c
