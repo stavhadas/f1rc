@@ -1,6 +1,9 @@
 #ifndef HLDC_H_
 #define HLDC_H_
 
+#include <stdint.h>
+#include <stddef.h>
+
 #define MAX_PAYLOAD_SIZE (1024)
 #define HLDC_START_FLAG (0x7E)
 #define HLDC_END_FLAG (0x7E)
