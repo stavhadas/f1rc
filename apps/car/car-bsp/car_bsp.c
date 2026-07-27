@@ -5,6 +5,8 @@
 #include "stm32f4xx_hal_rcc.h"
 #include "car.h"
 #include "cmsis_os2.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 static bool car_bsp_system_clock_config(void)
 {
@@ -69,4 +71,13 @@ bool car_bsp_start(void)
 {
   osKernelStart();
   return true;
+}
+
+// Required by configCHECK_FOR_STACK_OVERFLOW (FreeRTOSConfig.h). Without
+// this, an overflow corrupts adjacent memory silently instead of trapping.
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+  (void)xTask;
+  (void)pcTaskName;
+  while (1) {}
 }
