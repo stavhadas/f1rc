@@ -1,3 +1,5 @@
+#include "uart_interface.h"
+
 void NMI_Handler(void)
 {
   while (1) {}
@@ -35,6 +37,10 @@ void TIM1_UP_TIM10_IRQHandler(void)
 
 void DMA2_Stream2_IRQHandler(void)
 {
-  //TODO: uncomment this
-  // HAL_DMA_IRQHandler(&hdma_usart1_rx);
+  uart_interface_dma_rx_irq_handler(DMA2_Stream2);
+}
+
+void USART1_IRQHandler(void)
+{
+  uart_interface_usart_irq_handler(USART1);
 }

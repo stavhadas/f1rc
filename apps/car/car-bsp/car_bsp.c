@@ -60,7 +60,7 @@ bool car_bsp_init(car_context_t *context)
 
   car_bsp_rtos_init();
 
-  uart_interface_init(&context->cmd_uart, USART1, 115200, UART_WORDLENGTH_8B, UART_STOPBITS_1, UART_PARITY_NONE, UART_MODE_TX_RX, UART_HWCONTROL_NONE, UART_OVERSAMPLING_16, DMA2_Stream2, DMA_CHANNEL_4, DMA2_Stream2_IRQn);
+  uart_interface_init(&context->cmd_uart, USART1, 115200, UART_WORDLENGTH_8B, UART_STOPBITS_1, UART_PARITY_NONE, UART_MODE_TX_RX, UART_HWCONTROL_NONE, UART_OVERSAMPLING_16, DMA2_Stream2, DMA_CHANNEL_4, DMA2_Stream2_IRQn, USART1_IRQn);
 
   return true;
 }
