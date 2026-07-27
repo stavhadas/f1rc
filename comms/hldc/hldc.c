@@ -43,10 +43,18 @@ void hldc_restart_buffer(hldc_context_t *ctx, bool is_last_packet_successfull)
     ctx->state = HLDC_STATE_START_FLAG;
     if (is_last_packet_successfull)
     {
-        // Reset to the end flag of the last successfully decoded frame, so that if the next packet starts immediately after, we can detect it without waiting for the next start flag
-        memmove(ctx->decode_buffer, ctx->decode_buffer + ctx->decode_buffer_index - 1, ctx->bytes_left_to_decode + 1);
+        // decode_buffer_index currently points at the just-consumed end flag.
+        // Every frame carries its own explicit start and end flag (see
+        // hldc_encode), so there is no shared boundary flag to retain --
+        // shift out only whatever comes after it (e.g. bytes of an
+        // already-pushed next frame) to the front of the buffer.
+        size_t trailing = ctx->bytes_left_to_decode - 1;
+        if (trailing > 0)
+        {
+            memmove(ctx->decode_buffer, ctx->decode_buffer + ctx->decode_buffer_index + 1, trailing);
+        }
         ctx->decode_buffer_index = 0;
-        ctx->bytes_left_to_decode += 1; // Account for the moved end flag byte
+        ctx->bytes_left_to_decode = trailing;
     }
     else
     {
@@ -282,9 +290,16 @@ hldc_status_t hldc_decode_pushed_bytes(hldc_context_t *ctx)
 {
     while (ctx->bytes_left_to_decode > 0)
     {
+        size_t index_before = ctx->decode_buffer_index;
+        size_t left_before = ctx->bytes_left_to_decode;
         hldc_status_t status = HLDC_STATUS_OK;
         status = hldc_handle_byte(ctx, ctx->decode_buffer[ctx->decode_buffer_index]);
-        if (status == HLDC_STATUS_OK)
+        // A completed frame (success or error) repositions the buffer itself
+        // via hldc_restart_buffer -- only advance past the current byte here
+        // when that didn't already happen, so the two adjustments don't stack.
+        if (status == HLDC_STATUS_OK &&
+            ctx->decode_buffer_index == index_before &&
+            ctx->bytes_left_to_decode == left_before)
         {
             ctx->decode_buffer_index++;
             ctx->bytes_left_to_decode--;
