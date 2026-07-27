@@ -33,7 +33,7 @@ class Interface(ABC):
         
     
     def send_thread_entry(self):
-        while self._stop_event.is_set():
+        while not self._stop_event.is_set():
             packet = self._send_queue.get()
             if self.protocols:
                 for protocol in self.protocols:
@@ -45,17 +45,31 @@ class Interface(ABC):
             else:
                 payload = packet.payload
             self.send_bytes(payload)
-    
+
     def recv_thread_entry(self):
-        while self._stop_event.is_set():
+        # Accumulate raw bytes across reads -- a protocol frame is rarely
+        # contained in a single receive_bytes() chunk on a real stream, so
+        # decode() is retried against the growing buffer until it succeeds.
+        buffer = bytearray()
+        while not self._stop_event.is_set():
             data = self.receive_bytes()
-            if data:
-                for protocol in self.protocols[::-1]:
-                    try:
-                        data, md = protocol.decode(data)
-                        return
-                    except Exception as e:
-                        print(f"Error encoding data with protocol {protocol.name}: {e}")
+            if not data:
+                continue
+            buffer.extend(data)
+            if len(buffer) > 4096:
+                # No valid frame has formed in a long time; drop it rather
+                # than grow unbounded.
+                buffer.clear()
+            for protocol in self.protocols[::-1]:
+                try:
+                    decoded, md = protocol.decode(bytes(buffer))
+                    self._receive_queue.put((decoded, md))
+                    buffer.clear()
+                    break
+                except Exception:
+                    # Expected steady-state while a frame is still arriving;
+                    # not logged to avoid spamming on every partial chunk.
+                    pass
     def start(self):
         self._stop_event.clear()
         self._recv_thread.start()
