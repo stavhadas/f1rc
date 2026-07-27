@@ -4,9 +4,9 @@
 // #include "car_dispatcher.h"
 #include "car_bsp.h"
 #include "car.h"
-
+#include "hldc.h"
+#include "cmsis_os2.h"
 uint32_t version[] = {1, 0, 0};
-
 
 #define CAR_COMMAND_PORT 0x20
 
@@ -57,14 +57,50 @@ uint32_t version[] = {1, 0, 0};
 //     return simpliciti_send_msg(&simpliciti_context, &frame, true, false);
 // }
 
+static hldc_context_t cmd_uart_hldc_context;
+
+static void on_cmd_uart_hldc_decode(hldc_frame_t *frame)
+{
+    while (1)
+    {
+    }
+}
+
+static void on_cmd_uart_recv(uint8_t *buffer, size_t length)
+{
+    hldc_push_bytes(&cmd_uart_hldc_context, buffer, length);
+}
+static void car_test_thread(void *arg)
+{
+    car_context_t *context = (car_context_t *)arg;
+    uint8_t test_data[] = "Hello, World!\n";
+    uint8_t encoded_frame[HLDC_MAX_FRAME_SIZE];
+    size_t encoded_length;
+    hldc_frame_t frame = {0};
+    frame.header.address = 0x01;
+    frame.header.control = 0x02;
+    frame.payload_length = sizeof(test_data);
+    memcpy(frame.payload, test_data, sizeof(test_data));
+    hldc_encode(&frame, encoded_frame, &encoded_length);
+    while (1)
+    {
+        uart_interface_send(&context->cmd_uart, encoded_frame, encoded_length);
+        osDelay(1000);
+    }
+}
+
 void car_init(car_context_t *context)
 {
+    context->cmd_uart.on_recv = on_cmd_uart_recv;
+    cmd_uart_hldc_context.on_frame = on_cmd_uart_hldc_decode;
+
+    osThreadNew(car_test_thread, context, NULL);
+
     if (!car_bsp_init(context))
     {
         while (1)
             ;
     }
-
 }
 
 void car_start(car_context_t *context)

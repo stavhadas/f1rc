@@ -37,7 +37,7 @@ target_include_directories(f1rc-car PRIVATE
 
 # Remove wrong libob.a library dependency when using cpp files
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
-target_link_libraries(f1rc-car PRIVATE f1rc stm32cubemx ${PROTOBUF_C_LIBRARIES})
+target_link_libraries(f1rc-car PRIVATE f1rc bsp ${PROTOBUF_C_LIBRARIES})
 
 add_custom_command(TARGET f1rc-car POST_BUILD
     COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:f1rc-car> $<TARGET_FILE_DIR:f1rc-car>/f1rc-car.bin
