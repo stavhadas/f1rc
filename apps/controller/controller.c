@@ -6,6 +6,7 @@
 #include "controller.h"
 #include "hldc.h"
 #include "hldc_thread.h"
+#include "cc1101_thread.h"
 #include <string.h>
 
 uint32_t version[] = {1, 0, 0};
@@ -123,6 +124,14 @@ void controller_init(controller_context_t *context)
         while (1)
             ;
     }
+
+    // CC1101 bring-up (probe, then CW + FIFO refill on success) runs on its
+    // own thread, not here: spi_interface_transfer() blocks on an RTOS
+    // semaphore, and that can only ever be woken by the scheduler, which
+    // isn't running yet at this point in controller_init() -- calling it
+    // here would hang forever. A radio bring-up failure doesn't halt the
+    // rest of controller startup either way.
+    cc1101_start_bringup_thread(&context->cc1101, NULL);
 }
 
 void controller_start(controller_context_t *context)

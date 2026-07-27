@@ -1,5 +1,6 @@
 #include "stm32f4xx_hal.h"
 #include "uart_interface.h"
+#include "spi_interface.h"
 
 extern TIM_HandleTypeDef htim1;
 
@@ -45,4 +46,19 @@ void DMA2_Stream2_IRQHandler(void)
 void USART1_IRQHandler(void)
 {
   uart_interface_usart_irq_handler(USART1);
+}
+
+void DMA1_Stream3_IRQHandler(void)
+{
+  spi_interface_dma_irq_handler(DMA1_Stream3);
+}
+
+void DMA1_Stream4_IRQHandler(void)
+{
+  spi_interface_dma_irq_handler(DMA1_Stream4);
+}
+
+void SPI2_IRQHandler(void)
+{
+  spi_interface_spi_irq_handler(SPI2);
 }

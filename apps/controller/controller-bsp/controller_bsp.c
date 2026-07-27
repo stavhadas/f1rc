@@ -56,6 +56,14 @@ bool controller_bsp_init(controller_context_t *context)
 
   uart_interface_init(&context->cmd_uart, USART1, 115200, UART_WORDLENGTH_8B, UART_STOPBITS_1, UART_PARITY_NONE, UART_MODE_TX_RX, UART_HWCONTROL_NONE, UART_OVERSAMPLING_16, DMA2_Stream2, DMA_CHANNEL_4, DMA2_Stream2_IRQn, USART1_IRQn);
 
+  spi_interface_init(&context->cc1101_spi, SPI2, SPI_BAUDRATEPRESCALER_4,
+                      DMA1_Stream4, DMA_CHANNEL_0, DMA1_Stream4_IRQn,
+                      DMA1_Stream3, DMA_CHANNEL_0, DMA1_Stream3_IRQn,
+                      SPI2_IRQn,
+                      GPIOB, GPIO_PIN_12,
+                      GPIOB, GPIO_PIN_14);
+  context->cc1101.spi = &context->cc1101_spi;
+
   return true;
 }
 
